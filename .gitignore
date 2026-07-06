@@ -13,6 +13,7 @@ Thumbs.db
 
 # Agent workspace configurations & instructions
 .agents/
+.kilo/
 
 # Original testing files (only index.html, css/, js/ are needed for deployment)
 gamedemo.html

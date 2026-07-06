@@ -25,6 +25,10 @@ class AudioSynth {
         this.masterGain.connect(this.ctx.destination);
     }
     
+    setComboCount(count) {
+        this.comboCount = count;
+    }
+    
     start() {
         this.init();
         if (this.ctx.state === 'suspended') {
@@ -82,8 +86,8 @@ class AudioSynth {
         let noteOffset = this.pattern[step];
         let pitch = this.basePitch + noteOffset;
         
-        // Transpose based on combo streaks (expects global comboCount)
-        const currentCombo = typeof comboCount !== 'undefined' ? comboCount : 0;
+        // Transpose based on combo streaks (expects local comboCount)
+        const currentCombo = this.comboCount || 0;
         if (currentCombo >= 2 && currentCombo < 5) {
             pitch += 12; // up one octave
         } else if (currentCombo >= 5) {
@@ -122,8 +126,8 @@ class AudioSynth {
         osc.frequency.setValueAtTime(this.midiToFreq(midi), time);
         
         filter.type = 'lowpass';
-        // Add dynamic filter modulation based on combo (expects global comboCount)
-        const currentCombo = typeof comboCount !== 'undefined' ? comboCount : 0;
+        // Add dynamic filter modulation based on combo (expects local comboCount)
+        const currentCombo = this.comboCount || 0;
         let baseCutoff = 350 + Math.sin(time * 3) * 150 + (currentCombo * 120);
         filter.frequency.setValueAtTime(baseCutoff, time);
         filter.frequency.exponentialRampToValueAtTime(60, time + 0.18);

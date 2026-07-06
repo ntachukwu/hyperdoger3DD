@@ -1,6 +1,13 @@
 // CONFIG block moved to js/config.js
 const audioSynth = new AudioSynth();
 let isMuted = false; // Mute state tracks if synthesizer sound outputs are disabled
+let userSpeedMultiplier = 1.0;
+const SPEED_MODE_KEY = 'hype_dodger_speed_mode';
+try {
+    userSpeedMultiplier = localStorage.getItem(SPEED_MODE_KEY) === 'chill' ? CONFIG.SPEED.CHILL_MULTIPLIER : 1.0;
+} catch (e) {
+    userSpeedMultiplier = 1.0;
+}
 
 document.getElementById('mute-btn').addEventListener('click', (e) => {
     isMuted = !isMuted;
@@ -96,6 +103,12 @@ let statsNodesHit = 0;    // Telemetry: correct node captures
 let statsNodesMissed = 0; // Telemetry: missed/incorrect node selections
 let statsFeverCount = 0;  // Telemetry: total fever activations triggered
 
+// Node HUD progressive disclosure state machine
+// HIDDEN → FLASH (on NODE gate spawn) → PERSISTENT (on first correct hit)
+let nodeHudMode = 'HIDDEN'; // 'HIDDEN' | 'FLASH' | 'PERSISTENT'
+let nodeFlashTimer = 0;     // Countdown for FLASH state in seconds
+let nodeFlashTimeout = null; // Reference for clearing flash timer
+
 // Load high score
 const savedBest = localStorage.getItem('hype_dodger_high');
 if (savedBest) {
@@ -141,6 +154,40 @@ function handleInputEnd() {
 document.getElementById('start-btn').addEventListener('click', startGame);
 document.getElementById('restart-btn').addEventListener('click', restartGame);
 
+document.getElementById('speed-btn').addEventListener('click', (e) => {
+    const oldMultiplier = userSpeedMultiplier;
+    const isChill = userSpeedMultiplier !== 1.0;
+    if (!isChill) {
+        userSpeedMultiplier = CONFIG.SPEED.CHILL_MULTIPLIER;
+        try { localStorage.setItem(SPEED_MODE_KEY, 'chill'); } catch (err) {}
+        document.getElementById('speed-btn').innerText = "SPEED: CHILL";
+        document.getElementById('speed-btn').classList.add('chill-active');
+        document.getElementById('speed-btn').setAttribute('aria-pressed', 'true');
+    } else {
+        userSpeedMultiplier = 1.0;
+        try { localStorage.setItem(SPEED_MODE_KEY, 'normal'); } catch (err) {}
+        document.getElementById('speed-btn').innerText = "SPEED: NORMAL";
+        document.getElementById('speed-btn').classList.remove('chill-active');
+        document.getElementById('speed-btn').setAttribute('aria-pressed', 'false');
+    }
+    if (typeof gameSpeed !== 'undefined' && oldMultiplier > 0) {
+        gameSpeed = gameSpeed / oldMultiplier * userSpeedMultiplier;
+    }
+    e.stopPropagation();
+});
+
+const speedBtn = document.getElementById('speed-btn');
+if (speedBtn) {
+    if (userSpeedMultiplier === CONFIG.SPEED.CHILL_MULTIPLIER) {
+        speedBtn.innerText = "SPEED: CHILL";
+        speedBtn.classList.add('chill-active');
+        speedBtn.setAttribute('aria-pressed', 'true');
+    } else {
+        speedBtn.innerText = "SPEED: NORMAL";
+        speedBtn.setAttribute('aria-pressed', 'false');
+    }
+}
+
 function startGame() {
     document.getElementById('start-screen').classList.add('hidden');
     gameStarted = true;
@@ -155,6 +202,8 @@ function restartGame() {
     initGame();
 }
 
+let gateShrinkIntervals = []; // Track active gate shrink animations for cleanup
+
 function initGame() {
     player = {
         x: 0,
@@ -164,7 +213,7 @@ function initGame() {
     };
     
     // Clear obstacles
-    obstacles.forEach(obs => scene.remove(obs.mesh));
+    obstacles.forEach(obs => { scene.remove(obs.mesh); scene.remove(obs.shadowMesh); if (obs.dangerLight) scene.remove(obs.dangerLight); });
     obstacles = [];
     
     // Clear particles
@@ -172,14 +221,17 @@ function initGame() {
         particles[i].active = false;
     }
     
-    // Clear gates
-    gates.forEach(g => scene.remove(g.mesh));
+    // Clear gates and shrink animations
+    gateShrinkIntervals.forEach(id => clearInterval(id));
+    gateShrinkIntervals = [];
+    gates.forEach(g => { scene.remove(g.mesh); if (g.leftPost) scene.remove(g.leftPost); if (g.rightPost) scene.remove(g.rightPost); });
     gates = [];
 
     score = 0;
-    gameSpeed = CONFIG.SPEED.START;
+    gameSpeed = CONFIG.SPEED.START * userSpeedMultiplier;
     timeScale = 1.0;
     comboCount = 0;
+    audioSynth.setComboCount(comboCount);
     comboTimer = 0.0;
     frameCount = 0;
     resetCamera(camera);
@@ -191,8 +243,13 @@ function initGame() {
     hamiltonianIndex = 0;
     feverActive = false;
     feverTimer = 0.0;
-    document.getElementById('node-panel').classList.remove('hidden');
-    updateNodeUI();
+    nodeHudMode = 'HIDDEN';
+    if (nodeFlashTimeout) { clearTimeout(nodeFlashTimeout); nodeFlashTimeout = null; }
+    const nodePanel = document.getElementById('node-panel');
+    nodePanel.classList.remove('hidden');
+    nodePanel.classList.remove('hud-visible');
+    drawNodePips();
+
     
     // Reset play stats telemetry
     statsNodesHit = 0;
@@ -248,6 +305,7 @@ function triggerNearMiss(obs) {
     
     comboCount++;
     comboTimer = comboDuration;
+    audioSynth.setComboCount(comboCount);
     
     let bonus = CONFIG.MECHANICS.MISS_SCORE_BASE * comboCount;
     score += bonus;
@@ -315,16 +373,23 @@ function triggerGameOver() {
     else if (accuracy >= 30 && score >= 1000) grade = "C";
     
     // Update summary elements
-    document.getElementById('stats-accuracy').innerText = `${accuracy}%`;
-    document.getElementById('stats-nodes').innerText = `${statsNodesHit} / ${totalNodes}`;
-    document.getElementById('stats-fever').innerText = statsFeverCount;
+    const accuracyEl = document.getElementById('stats-accuracy');
+    if (accuracyEl) accuracyEl.innerText = `${accuracy}%`;
+    
+    const nodesEl = document.getElementById('stats-nodes');
+    if (nodesEl) nodesEl.innerText = `${statsNodesHit} / ${totalNodes}`;
+    
+    const feverEl = document.getElementById('stats-fever');
+    if (feverEl) feverEl.innerText = statsFeverCount;
     
     const gradeEl = document.getElementById('stats-grade');
-    gradeEl.innerText = grade;
-    gradeEl.style.color = (grade === 'S' || grade === 'A') ? '#00ffcc' : '#ff0055';
-    gradeEl.style.textShadow = (grade === 'S' || grade === 'A') 
-        ? '0 0 15px rgba(0, 255, 204, 0.8)' 
-        : '0 0 15px rgba(255, 0, 85, 0.8)';
+    if (gradeEl) {
+        gradeEl.innerText = grade;
+        gradeEl.style.color = (grade === 'S' || grade === 'A') ? '#00ffcc' : '#ff0055';
+        gradeEl.style.textShadow = (grade === 'S' || grade === 'A') 
+            ? '0 0 15px rgba(0, 255, 204, 0.8)' 
+            : '0 0 15px rgba(255, 0, 85, 0.8)';
+    }
     
     // Record run stats to localStorage history log
     let history = [];
@@ -364,10 +429,17 @@ function triggerGameOver() {
     }
     
     // Show game over overlay
-    document.getElementById('final-score').innerText = score;
-    document.getElementById('final-best').innerText = highScore;
-    document.getElementById('gameover-screen').classList.remove('hidden');
-    document.getElementById('node-panel').classList.add('hidden');
+    const finalScoreEl = document.getElementById('final-score');
+    if (finalScoreEl) finalScoreEl.innerText = score;
+    
+    const finalBestEl = document.getElementById('final-best');
+    if (finalBestEl) finalBestEl.innerText = highScore;
+    
+    const gameoverScreen = document.getElementById('gameover-screen');
+    if (gameoverScreen) gameoverScreen.classList.remove('hidden');
+    
+    const nodePanelHide = document.getElementById('node-panel');
+    if (nodePanelHide) nodePanelHide.classList.add('hidden');
 }
 
 // --- Obstacle Spawner ---
@@ -403,15 +475,33 @@ function spawnObstacle(customX = null, customZ = null) {
     
     const mesh = new THREE.Mesh(geom, obsMat);
     // Randomized lateral positioning across lanes
-    mesh.position.set(
-        customX !== null ? customX : (Math.random() - 0.5) * CONFIG.OBSTACLES.SPAN_X,
-        size / 2, // Sit exactly flush on road base
-        customZ !== null ? customZ : CONFIG.OBSTACLES.SPAWN_Z
-    );
+    const spawnX = customX !== null ? customX : (Math.random() - 0.5) * CONFIG.OBSTACLES.SPAN_X;
+    const spawnZ = customZ !== null ? customZ : CONFIG.OBSTACLES.SPAWN_Z;
+    mesh.position.set(spawnX, size / 2, spawnZ);
     scene.add(mesh);
-    
+
+    // Warning shadow — flat circle on grid, grows as obstacle approaches
+    const shadowGeom = new THREE.CircleGeometry(size * 0.85, 16);
+    shadowGeom.rotateX(-Math.PI / 2);
+    const shadowMat = new THREE.MeshBasicMaterial({
+        color: 0xff0055,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false
+    });
+    const shadowMesh = new THREE.Mesh(shadowGeom, shadowMat);
+    shadowMesh.position.set(spawnX, 0.02, spawnZ);
+    scene.add(shadowMesh);
+
+    // Danger pulse light — red point light that pulses to scream "solid obstacle"
+    const dangerLight = new THREE.PointLight(0xff0022, 1.5, 5);
+    dangerLight.position.set(spawnX, size / 2, spawnZ);
+    scene.add(dangerLight);
+
     obstacles.push({
         mesh: mesh,
+        shadowMesh: shadowMesh,
+        dangerLight: dangerLight,
         passed: false,
         rx: (Math.random() - 0.5) * CONFIG.OBSTACLES.ROT_MAX,
         ry: (Math.random() - 0.5) * CONFIG.OBSTACLES.ROT_MAX,
@@ -467,10 +557,25 @@ function createGateMesh(x, op) {
     
     const mesh = new THREE.Mesh(geom, mat);
     mesh.position.set(x, CONFIG.GATES.HEIGHT / 2, CONFIG.GATES.SPAWN_Z);
+
+    // Neon goal-post pillars — make gates read as a portal, not an obstacle
+    const postColor = isPositive ? 0x00ffcc : 0xff0055;
+    const postH = 5.5;
+    const postGeo = new THREE.BoxGeometry(0.08, postH, 0.08);
+    const postMat = new THREE.MeshBasicMaterial({ color: postColor });
+    const halfW = CONFIG.GATES.WIDTH / 2 + 0.12;
+
+    const leftPost = new THREE.Mesh(postGeo, postMat);
+    leftPost.position.set(x - halfW, postH / 2, CONFIG.GATES.SPAWN_Z);
+
+    const rightPost = new THREE.Mesh(postGeo, postMat);
+    rightPost.position.set(x + halfW, postH / 2, CONFIG.GATES.SPAWN_Z);
     
     return {
-        mesh: mesh,
-        op: op,
+        mesh,
+        leftPost,
+        rightPost,
+        op,
         passed: false
     };
 }
@@ -503,10 +608,17 @@ function spawnGatePair() {
         const rightGate = createGateMesh(CONFIG.GATES.LANE_X, rightOp);
         
         scene.add(leftGate.mesh);
+        scene.add(leftGate.leftPost);
+        scene.add(leftGate.rightPost);
         scene.add(rightGate.mesh);
+        scene.add(rightGate.leftPost);
+        scene.add(rightGate.rightPost);
         
         gates.push(leftGate);
         gates.push(rightGate);
+
+        // Trigger HUD flash — a NODE gate is on screen
+        flashNodeHud();
         
         // Hazard block behind the correct node!
         const spawnHazardBehindSuccess = Math.random() < 0.85;
@@ -540,7 +652,11 @@ function spawnGatePair() {
     const rightGate = createGateMesh(CONFIG.GATES.LANE_X, rightOp);
     
     scene.add(leftGate.mesh);
+    scene.add(leftGate.leftPost);
+    scene.add(leftGate.rightPost);
     scene.add(rightGate.mesh);
+    scene.add(rightGate.leftPost);
+    scene.add(rightGate.rightPost);
     
     gates.push(leftGate);
     gates.push(rightGate);
@@ -566,32 +682,41 @@ function applyGateEffect(op) {
         score *= op.val;
         comboCount += 2; // Extra reward combo bump
         comboTimer = comboDuration;
+        audioSynth.setComboCount(comboCount);
         showFloatingText(`x${op.val}`, "yellow-glow");
         audioSynth.playDodge();
         triggerFlash(CONFIG.COLORS.GATE_POSITIVE_BG, 0.22);
     } else if (op.type === 'sub') {
         score = Math.max(0, score - op.val);
         comboCount = 0; // Break combo chain
+        audioSynth.setComboCount(comboCount);
         showFloatingText(`-${op.val}`, "pink-glow");
         audioSynth.playBounce();
         triggerFlash(CONFIG.COLORS.GATE_NEGATIVE_BG, 0.12);
     } else if (op.type === 'div') {
         score = Math.floor(score / op.val);
         comboCount = 0; // Break combo chain
+        audioSynth.setComboCount(comboCount);
         showFloatingText(`/${op.val}`, "pink-glow");
         audioSynth.playBounce();
         triggerFlash(CONFIG.COLORS.GATE_NEGATIVE_BG, 0.22);
     } else if (op.type === 'hamiltonian_correct') {
         hamiltonianIndex = (hamiltonianIndex + 1) % CONFIG.HAMILTONIAN_CYCLE.length;
-        score += 100; // Reward for node capture
+        score += 100;
         comboCount++;
         comboTimer = comboDuration;
+        audioSynth.setComboCount(comboCount);
         showFloatingText(`NODE CAPTURED`, "cyan-glow");
         audioSynth.playDodge();
         triggerFlash(CONFIG.COLORS.GATE_POSITIVE_BG, 0.15);
-        
         statsNodesHit++;
-        
+
+        // FLASH → PERSISTENT: first correct hit unlocks the persistent pip ring
+        if (nodeHudMode !== 'PERSISTENT') {
+            nodeHudMode = 'PERSISTENT';
+            if (nodeFlashTimeout) { clearTimeout(nodeFlashTimeout); nodeFlashTimeout = null; }
+        }
+
         if (hamiltonianIndex === 0) {
             // Cycle complete! Trigger Fever Mode
             feverActive = true;
@@ -618,10 +743,69 @@ function applyGateEffect(op) {
     updateComboUI();
 }
 
+function drawNodePips() {
+    const canvas = document.getElementById('node-pip-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const total = CONFIG.HAMILTONIAN_CYCLE.length; // 27
+    const filled = hamiltonianIndex;
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    const pipR = 3;
+    const gap = (W - total * pipR * 2) / (total + 1);
+
+    for (let i = 0; i < total; i++) {
+        const cx = gap + i * (pipR * 2 + gap) + pipR;
+        const cy = H / 2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, pipR, 0, Math.PI * 2);
+        if (i < filled) {
+            // Captured node — gold fill
+            ctx.fillStyle = '#ffcc00';
+            ctx.shadowColor = '#ffcc00';
+            ctx.shadowBlur = 6;
+        } else {
+            // Uncaptured — dim outline
+            ctx.fillStyle = 'rgba(255,204,0,0.18)';
+            ctx.shadowBlur = 0;
+        }
+        ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+}
+
+function flashNodeHud() {
+    // HIDDEN → FLASH: briefly show the panel when a NODE gate appears
+    if (nodeHudMode === 'PERSISTENT') return;
+    nodeHudMode = 'FLASH';
+    const nodePanel = document.getElementById('node-panel');
+    if (nodePanel) nodePanel.classList.add('hud-visible');
+    if (nodeFlashTimeout) clearTimeout(nodeFlashTimeout);
+    nodeFlashTimeout = setTimeout(() => {
+        if (nodeHudMode === 'FLASH') {
+            nodeHudMode = 'HIDDEN';
+            const panel = document.getElementById('node-panel');
+            if (panel) panel.classList.remove('hud-visible');
+        }
+    }, 3000);
+}
+
 function updateNodeUI() {
-    const nextNode = CONFIG.HAMILTONIAN_CYCLE[hamiltonianIndex];
-    const totalNodes = CONFIG.HAMILTONIAN_CYCLE.length;
-    document.getElementById('node-text').innerText = `${nextNode} (${hamiltonianIndex}/${totalNodes})`;
+    const nodePanel = document.getElementById('node-panel');
+    if (nodePanel && nodeHudMode === 'PERSISTENT') {
+        nodePanel.classList.add('hud-visible');
+    }
+    const label = document.getElementById('node-flash-label');
+    if (label) {
+        if (nodeHudMode === 'FLASH') {
+            const nextNode = CONFIG.HAMILTONIAN_CYCLE[hamiltonianIndex];
+            label.textContent = `NODE ▸ ${nextNode}`;
+        } else if (nodeHudMode === 'PERSISTENT') {
+            label.textContent = 'CYCLE PROGRESS';
+        }
+    }
+    drawNodePips();
 }
 
 function checkStageProgression() {
@@ -775,7 +959,7 @@ function gameLoop(currentTime) {
         shipGroup.rotation.y = player.vx * CONFIG.PLAYER.YAW_TILT; // yaw tilt
         
         // Continuous speed increase with acceleration and clamping
-        gameSpeed = Math.min(gameSpeed + CONFIG.SPEED.ACCEL * timeScale, CONFIG.SPEED.MAX);
+        gameSpeed = Math.min(gameSpeed + CONFIG.SPEED.ACCEL * timeScale * userSpeedMultiplier, CONFIG.SPEED.MAX * userSpeedMultiplier);
         
         // Scale velocity based on the current stage speed scale configuration (boosted in Fever mode)
         const feverSpeedMultiplier = feverActive ? 1.5 : 1.0;
@@ -800,11 +984,13 @@ function gameLoop(currentTime) {
             comboTimer -= dt * timeScale;
             if (comboTimer <= 0) {
                 comboCount = 0;
+                audioSynth.setComboCount(comboCount);
                 updateComboUI();
                 showFloatingText("COMBO RESET", "pink-glow");
             } else {
                 let pct = (comboTimer / comboDuration) * 100; // convert ratio to percentage for progress bar width
-                document.getElementById('combo-progress-fill').style.width = `${pct}%`;
+                const progressFill = document.getElementById('combo-progress-fill');
+                if (progressFill) progressFill.style.width = `${pct}%`;
             }
         }
         
@@ -852,6 +1038,22 @@ function gameLoop(currentTime) {
             obs.mesh.rotation.y += obs.ry * timeScale;
             obs.mesh.rotation.z += obs.rz * timeScale;
             
+            // Cinematic approach factor: 0 = far, 1 = at player
+            const t = Math.max(0, Math.min(1, (obs.mesh.position.z - CONFIG.OBSTACLES.SPAWN_Z) / (-CONFIG.OBSTACLES.SPAWN_Z)));
+
+            // A: Warning shadow — tracks obstacle, expands and brightens as it closes in
+            obs.shadowMesh.position.z = obs.mesh.position.z;
+            obs.shadowMesh.material.opacity = t * 0.6;
+            const shadowScale = 0.1 + t * 0.9;
+            obs.shadowMesh.scale.set(shadowScale, shadowScale, shadowScale);
+
+            // B: Emissive ramp — dark far away, neon pink (0xff0055) up close
+            obs.mesh.material.emissive.setRGB(t * 1.0, 0, t * 0.333);
+
+            // Danger pulse light — intensity throbs to signal solid obstacle
+            obs.dangerLight.position.z = obs.mesh.position.z;
+            obs.dangerLight.intensity = (1.5 + 0.8 * Math.sin(frameCount * 0.18)) * t;
+
             // Pulsate/breathe obstacles on a synthesizer speed beat
             let beatScale = 1.0 + 0.08 * Math.sin(frameCount * 0.15);
             obs.mesh.scale.set(beatScale, beatScale, beatScale);
@@ -879,6 +1081,8 @@ function gameLoop(currentTime) {
         // Remove obstacles that have flown past the camera viewport
         if (obs.mesh.position.z > CONFIG.COLLISION.DESPAWN_Z) {
             scene.remove(obs.mesh);
+            scene.remove(obs.shadowMesh);
+            scene.remove(obs.dangerLight);
             obstacles.splice(i, 1);
             i--;
         }
@@ -892,6 +1096,15 @@ function gameLoop(currentTime) {
             // Gates fly down Z axis
             const activeSpeed = gameSpeed * CONFIG.STAGES[currentStageIndex].speedScale;
             gate.mesh.position.z += activeSpeed * timeScale;
+
+            // Sync pillar posts Z with panel
+            gate.leftPost.position.z = gate.mesh.position.z;
+            gate.rightPost.position.z = gate.mesh.position.z;
+
+            // Portal bob — panels float up/down, reinforcing "fly-through" read
+            gate.mesh.position.y = CONFIG.GATES.HEIGHT / 2 + 0.15 * Math.sin(frameCount * 0.04);
+            gate.leftPost.position.y = gate.mesh.position.y;
+            gate.rightPost.position.y = gate.mesh.position.y;
             
             // Collision Check (bounding box logic)
             let dx = Math.abs(shipGroup.position.x - gate.mesh.position.x);
@@ -907,17 +1120,23 @@ function gameLoop(currentTime) {
                 
                 applyGateEffect(gate.op);
                 
-                // Fade out/scale down visual gate
+                // Fade out/scale down visual gate and posts
                 let scaleVal = 1.0;
                 const shrinkAnim = setInterval(() => {
                     scaleVal -= 0.15;
                     if (scaleVal <= 0.0) {
                         clearInterval(shrinkAnim);
+                        gateShrinkIntervals = gateShrinkIntervals.filter(id => id !== shrinkAnim);
                         scene.remove(gate.mesh);
+                        scene.remove(gate.leftPost);
+                        scene.remove(gate.rightPost);
                     } else {
                         gate.mesh.scale.set(scaleVal, scaleVal, scaleVal);
+                        gate.leftPost.scale.set(scaleVal, scaleVal, scaleVal);
+                        gate.rightPost.scale.set(scaleVal, scaleVal, scaleVal);
                     }
                 }, 16);
+                gateShrinkIntervals.push(shrinkAnim);
             }
         }
         
@@ -931,6 +1150,8 @@ function gameLoop(currentTime) {
                 showFloatingText("CHAIN RESET", "pink-glow");
             }
             scene.remove(gate.mesh);
+            scene.remove(gate.leftPost);
+            scene.remove(gate.rightPost);
             gates.splice(i, 1);
             i--;
         }

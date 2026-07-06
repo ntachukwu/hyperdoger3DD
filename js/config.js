@@ -2,7 +2,8 @@ const CONFIG = {
     SPEED: {
         START: 0.8,    // Starting game velocity
         MAX: 2.5,      // Terminal velocity cap to keep obstacles avoidable
-        ACCEL: 0.0003  // Forward speed increment per frame tick
+        ACCEL: 0.0003, // Forward speed increment per frame tick
+        CHILL_MULTIPLIER: 0.65 // Optional slower speed mode multiplier
     },
     ENGINE: {
         DILATION_REC: 0.08,        // Timescale bullet-time recovery rate per frame

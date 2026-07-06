@@ -1,24 +1,25 @@
 // --- UI Trigger & Update Functions ---
 
 function updateScoreUI() {
-    // Expects global score and highScore
+    const scoreEl = document.getElementById('score-text');
+    const bestEl = document.getElementById('best-text');
+    if (!scoreEl || !bestEl) return;
     const currentScore = typeof score !== 'undefined' ? score : 0;
     const currentBest = typeof highScore !== 'undefined' ? highScore : 0;
-    document.getElementById('score-text').innerText = String(currentScore).padStart(5, '0');
-    document.getElementById('best-text').innerText = String(currentBest).padStart(5, '0');
+    scoreEl.innerText = String(currentScore).padStart(5, '0');
+    bestEl.innerText = String(currentBest).padStart(5, '0');
 }
 
 function updateComboUI() {
-    // Expects global comboCount
-    const currentCombo = typeof comboCount !== 'undefined' ? comboCount : 0;
     const comboContainer = document.getElementById('combo-container');
     const comboBadge = document.getElementById('combo-badge');
+    if (!comboContainer || !comboBadge) return;
+    const currentCombo = typeof comboCount !== 'undefined' ? comboCount : 0;
     
     if (currentCombo > 0) {
         comboBadge.innerText = `COMBO x${currentCombo}`;
         comboContainer.classList.add('active');
         
-        // Dynamically shift badge color based on combo scale
         if (currentCombo >= 5) {
             comboBadge.style.color = 'var(--neon-pink)';
             comboBadge.style.textShadow = '0 0 15px rgba(255,0,85,0.8)';
@@ -36,6 +37,8 @@ function updateComboUI() {
 
 function showFloatingText(text, glowClass) {
     const container = document.getElementById('popup-container');
+    if (!container) return;
+    
     const popup = document.createElement('div');
     popup.className = `floating-text ${glowClass}`;
     popup.innerText = text;
@@ -46,7 +49,6 @@ function showFloatingText(text, glowClass) {
     const yCenter = CONFIG.UI && CONFIG.UI.Y_CENTER ? CONFIG.UI.Y_CENTER : 40;
     const yDev = CONFIG.UI && CONFIG.UI.Y_DEV ? CONFIG.UI.Y_DEV : 15;
 
-    // Position randomly centered
     let x = xCenter + (Math.random() - 0.5) * xDev;
     let y = yCenter + (Math.random() - 0.5) * yDev;
     popup.style.left = `${x}%`;
@@ -55,13 +57,14 @@ function showFloatingText(text, glowClass) {
     container.appendChild(popup);
     
     setTimeout(() => {
-        popup.remove();
+        if (popup.parentNode) popup.remove();
     }, popupDuration);
 }
 
 // Flash overlay for near misses/bounces
 function triggerFlash(color, opacity = 0.25) {
     const flash = document.getElementById('flash-overlay');
+    if (!flash) return;
     flash.style.backgroundColor = color;
     flash.style.opacity = opacity;
     
