@@ -95,6 +95,7 @@ const comboDuration = 2.5; // seconds
 let isSteeringLeft = false;
 let isSteeringRight = false;
 let gates = []; // Holds list of active math gate panels
+let nextPairId = 0; // Incrementing ID to identify gate pairs
 let currentStageIndex = 0; // Tracks player's active visual and speed level stage
 let hamiltonianIndex = 0; // Current node index in CONFIG.HAMILTONIAN_CYCLE
 let feverActive = false; // Is invincibility fever mode active
@@ -576,7 +577,8 @@ function createGateMesh(x, op) {
         leftPost,
         rightPost,
         op,
-        passed: false
+        passed: false,
+        pairId: 0
     };
 }
 
@@ -604,18 +606,22 @@ function spawnGatePair() {
             ? { type: 'hamiltonian_incorrect', val: 0, label: `NODE ${incorrectNode}` } 
             : { type: 'hamiltonian_correct', val: 0, label: `NODE ${correctNode}` };
             
-        const leftGate = createGateMesh(-CONFIG.GATES.LANE_X, leftOp);
-        const rightGate = createGateMesh(CONFIG.GATES.LANE_X, rightOp);
-        
-        scene.add(leftGate.mesh);
-        scene.add(leftGate.leftPost);
-        scene.add(leftGate.rightPost);
-        scene.add(rightGate.mesh);
-        scene.add(rightGate.leftPost);
-        scene.add(rightGate.rightPost);
-        
-        gates.push(leftGate);
-        gates.push(rightGate);
+    const leftGate = createGateMesh(-CONFIG.GATES.LANE_X, leftOp);
+    const rightGate = createGateMesh(CONFIG.GATES.LANE_X, rightOp);
+    
+    scene.add(leftGate.mesh);
+    scene.add(leftGate.leftPost);
+    scene.add(leftGate.rightPost);
+    scene.add(rightGate.mesh);
+    scene.add(rightGate.leftPost);
+    scene.add(rightGate.rightPost);
+    
+    const pairId = nextPairId++;
+    leftGate.pairId = pairId;
+    rightGate.pairId = pairId;
+    
+    gates.push(leftGate);
+    gates.push(rightGate);
 
         // Trigger HUD flash — a NODE gate is on screen
         flashNodeHud();
@@ -658,6 +664,10 @@ function spawnGatePair() {
     scene.add(rightGate.leftPost);
     scene.add(rightGate.rightPost);
     
+    const pairId = nextPairId++;
+    leftGate.pairId = pairId;
+    rightGate.pairId = pairId;
+    
     gates.push(leftGate);
     gates.push(rightGate);
     
@@ -675,6 +685,7 @@ function applyGateEffect(op) {
         score += op.val;
         comboCount++;
         comboTimer = comboDuration;
+        audioSynth.setComboCount(comboCount);
         showFloatingText(`+${op.val}`, "cyan-glow");
         audioSynth.playDodge();
         triggerFlash(CONFIG.COLORS.GATE_POSITIVE_BG, 0.12);
@@ -732,6 +743,8 @@ function applyGateEffect(op) {
         updateNodeUI();
     } else if (op.type === 'hamiltonian_incorrect') {
         hamiltonianIndex = 0; // Reset chain
+        comboCount = 0; // Break combo chain
+        audioSynth.setComboCount(comboCount);
         showFloatingText(`CHAIN BROKEN!`, "pink-glow");
         audioSynth.playBounce();
         triggerFlash(CONFIG.COLORS.GATE_NEGATIVE_BG, 0.2);
@@ -752,7 +765,7 @@ function drawNodePips() {
     const W = canvas.width, H = canvas.height;
     ctx.clearRect(0, 0, W, H);
 
-    const pipR = 3;
+    const pipR = 2;
     const gap = (W - total * pipR * 2) / (total + 1);
 
     for (let i = 0; i < total; i++) {
@@ -1113,7 +1126,7 @@ function gameLoop(currentTime) {
             if (!gate.passed && dx < (CONFIG.GATES.WIDTH / 2 + 0.2) && dz < 1.0) {
                 // Mark both gates in the pair as collected to prevent double-resets or despawn misses
                 gates.forEach(g => {
-                    if (Math.abs(g.mesh.position.z - gate.mesh.position.z) < 2.0) {
+                    if (g.pairId === gate.pairId) {
                         g.passed = true;
                     }
                 });
