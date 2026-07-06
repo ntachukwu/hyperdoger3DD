@@ -1,0 +1,18 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor/IDE configs
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# Agent workspace configurations & instructions
+.agents/
+
+# Original testing files (only index.html, css/, js/ are needed for deployment)
+gamedemo.html
