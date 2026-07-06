@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Hype Dodger 3D: Synthwave Drift</title>
+    
+    <!-- SEO Best Practices -->
+    <meta name="description" content="An intense, hyper-addictive 3D retro-future synthwave drift game. Dodge obstacles, trigger near misses, build massive combos, and ride the dopamine flow.">
+    <meta name="theme-color" content="#0a0a12">
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="canvas-container">
+    <!-- CRT lines overlay -->
+    <div id="scanline-overlay"></div>
+    
+    <!-- Screen Flash -->
+    <div id="flash-overlay"></div>
+    
+    <!-- Floating Popups text overlay -->
+    <div id="popup-container"></div>
+    
+    <!-- HUD Overlay -->
+    <div id="hud">
+        <div id="score-panel" class="hud-panel">
+            <span class="score-label">Score</span>
+            <span id="score-text" class="score-val">00000</span>
+        </div>
+        
+        <button id="mute-btn">SOUND: ON</button>
+        
+        <div id="node-panel" class="hud-panel hidden">
+            <span class="score-label">Next Node</span>
+            <span id="node-text" class="score-val" style="color: #ffcc00; text-shadow: 0 0 10px rgba(255, 204, 0, 0.6);">022 (0/27)</span>
+        </div>
+        
+        <div id="best-panel" class="hud-panel">
+            <span class="score-label">Record</span>
+            <span id="best-text" class="score-val">00000</span>
+        </div>
+    </div>
+    
+    <!-- Combo streak notification -->
+    <div id="combo-container">
+        <div id="combo-badge">COMBO x0</div>
+        <div id="combo-progress-bar">
+            <div id="combo-progress-fill"></div>
+        </div>
+    </div>
+    
+    <!-- Start/Menu Screen -->
+    <div id="start-screen" class="modal-screen">
+        <div class="logo-container">
+            <div class="logo-sub">NEON WAVE DRIVER</div>
+            <h1 class="logo-main">HYPE DODGER</h1>
+        </div>
+        
+        <button id="start-btn" class="btn-action">Enter the Grid</button>
+        
+        <div class="controls-tip">
+            Steer: Click/Tap <span>LEFT</span> or <span>RIGHT</span> half of the screen.<br>
+            Drift around cubes to trigger <span>NEAR MISS</span> slow-motion combos!<br>
+            Avoid crashing into walls and obstacles.
+        </div>
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="gameover-screen" class="modal-screen hidden">
+        <h2 id="gameover-title">SYSTEM CRASH</h2>
+        <div id="gameover-sub">SHIP DESTROYED DOWN THE WIREFRAME HIGHWAY</div>
+        
+        <div id="score-summary">
+            <div class="summary-panel">
+                <div class="summary-label">Final Score</div>
+                <div id="final-score" class="summary-val">0</div>
+            </div>
+            <div class="summary-panel">
+                <div class="summary-label">High Score</div>
+                <div id="final-best" class="summary-val">0</div>
+            </div>
+        </div>
+        
+        <div id="stats-summary" style="display: flex; gap: 12px; margin: 15px 0 25px 0; justify-content: center; flex-wrap: wrap;">
+            <div class="summary-panel" style="padding: 10px 15px; min-width: 80px; flex: 1;">
+                <div class="summary-label" style="font-size: 9px;">Accuracy</div>
+                <div id="stats-accuracy" class="summary-val" style="font-size: 18px; color: #00ffcc;">0%</div>
+            </div>
+            <div class="summary-panel" style="padding: 10px 15px; min-width: 80px; flex: 1;">
+                <div class="summary-label" style="font-size: 9px;">Nodes Hit</div>
+                <div id="stats-nodes" class="summary-val" style="font-size: 18px; color: #ff0055;">0 / 0</div>
+            </div>
+            <div class="summary-panel" style="padding: 10px 15px; min-width: 80px; flex: 1;">
+                <div class="summary-label" style="font-size: 9px;">Fever Cycles</div>
+                <div id="stats-fever" class="summary-val" style="font-size: 18px; color: #ffff00;">0</div>
+            </div>
+            <div class="summary-panel" style="padding: 10px 15px; min-width: 80px; flex: 1; border-color: rgba(255, 204, 0, 0.45);">
+                <div class="summary-label" style="font-size: 9px; color: #ffcc00;">Grade</div>
+                <div id="stats-grade" class="summary-val" style="font-size: 20px; font-weight: 900;">D</div>
+            </div>
+        </div>
+        
+        <p id="feedback-tip" style="font-size: 10px; color: #8888aa; margin: 0 auto 10px auto; max-width: 320px; line-height: 1.4; text-align: center;">
+            Help us tune the highway! Let us know: How did the steering feel? Was the stage speed pacing too fast? Were the flashing colors disorienting?
+        </p>
+        <button id="telemetry-btn" class="btn-action" style="background: rgba(10, 10, 18, 0.45); color: #8888aa; border-color: rgba(255, 255, 255, 0.08); margin-bottom: 12px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">Provide Feedback (Optional)</button>
+        <button id="restart-btn" class="btn-action">Reboot System</button>
+    </div>
+</div>
+
+<!-- Three.js Library -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="js/config.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/particles.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/assets.js"></script>
+<script src="js/camera.js"></script>
+<script src="js/game.js"></script>
+
+</body>
+</html>

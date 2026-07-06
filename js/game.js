@@ -1,0 +1,956 @@
+// CONFIG block moved to js/config.js
+const audioSynth = new AudioSynth();
+let isMuted = false; // Mute state tracks if synthesizer sound outputs are disabled
+
+document.getElementById('mute-btn').addEventListener('click', (e) => {
+    isMuted = !isMuted;
+    audioSynth.setMute(isMuted);
+    document.getElementById('mute-btn').innerText = isMuted ? "SOUND: OFF" : "SOUND: ON";
+    e.stopPropagation(); // Avoid triggering screen input event listener
+});
+
+// --- Three.js Setup & Graphics ---
+const container = document.getElementById('canvas-container');
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x05050a, CONFIG.SYSTEM.FOG_DENSITY);
+
+// Set up camera using modular controller
+const camera = createCamera();
+
+// Setup renderer (fixed 9:16 target aspect ratio)
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, CONFIG.SYSTEM.MAX_DPR));
+container.insertBefore(renderer.domElement, container.firstChild);
+
+// --- Retro Assets Generation (No External Assets) ---
+const { gridTexture, shipGroup, leftLaser, rightLaser, sunsetMesh, dirLight } = createGameAssets(scene);
+
+// --- High Performance Instanced Particle System ---
+initParticles(scene);
+
+// --- Speed Lines (Dynamic Warp Effect) ---
+const speedLines = [];
+const speedLineCount = CONFIG.SPEED_LINES.COUNT;
+const speedLineGeom = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(0, 0, 4)
+]);
+const speedLineMat = new THREE.LineBasicMaterial({
+    color: 0x9d00ff,
+    transparent: true,
+    opacity: 0.35
+});
+
+for (let i = 0; i < speedLineCount; i++) {
+    const line = new THREE.Line(speedLineGeom, speedLineMat);
+    resetSpeedLine(line);
+    scene.add(line);
+    speedLines.push(line);
+}
+
+function resetSpeedLine(line) {
+    line.position.x = (Math.random() - 0.5) * CONFIG.SPEED_LINES.X_SPAN;
+    line.position.y = Math.random() * CONFIG.SPEED_LINES.Y_HEIGHT + CONFIG.SPEED_LINES.Y_BASE;
+    line.position.z = CONFIG.SPEED_LINES.Z_FAR - Math.random() * CONFIG.SPEED_LINES.Z_RANGE;
+}
+
+function updateSpeedLines(spd, tScale) {
+    speedLines.forEach(line => {
+        line.position.z += spd * CONFIG.SPEED_LINES.V_MULT * tScale;
+        if (line.position.z > CONFIG.SPEED_LINES.Z_RESET) {
+            resetSpeedLine(line);
+        }
+    });
+}
+
+// CONFIG block moved to top
+
+// --- Game State Variables ---
+let player = {
+    x: 0,
+    vx: 0,
+    roll: 0,
+    targetRoll: 0
+};
+
+let obstacles = [];
+let score = 0;
+let highScore = 0;
+let gameSpeed = CONFIG.SPEED.START;
+let timeScale = 1.0;
+let gameOver = false;
+let gameStarted = false;
+let frameCount = 0;
+let comboCount = 0;
+let comboTimer = 0.0;
+const comboDuration = 2.5; // seconds
+
+let isSteeringLeft = false;
+let isSteeringRight = false;
+let gates = []; // Holds list of active math gate panels
+let currentStageIndex = 0; // Tracks player's active visual and speed level stage
+let hamiltonianIndex = 0; // Current node index in CONFIG.HAMILTONIAN_CYCLE
+let feverActive = false; // Is invincibility fever mode active
+let feverTimer = 0.0;    // Time remaining in fever mode
+let statsNodesHit = 0;    // Telemetry: correct node captures
+let statsNodesMissed = 0; // Telemetry: missed/incorrect node selections
+let statsFeverCount = 0;  // Telemetry: total fever activations triggered
+
+// Load high score
+const savedBest = localStorage.getItem('hype_dodger_high');
+if (savedBest) {
+    highScore = parseInt(savedBest, 10);
+    updateScoreUI();
+}
+
+// --- Steer and Movement Inputs ---
+container.addEventListener('mousedown', handleInputStart);
+container.addEventListener('touchstart', handleInputStart, { passive: false });
+
+window.addEventListener('mouseup', handleInputEnd);
+window.addEventListener('touchend', handleInputEnd);
+window.addEventListener('touchcancel', handleInputEnd);
+
+function handleInputStart(e) {
+    if (!gameStarted) return;
+    if (gameOver) return;
+    
+    let clientX;
+    if (e.type === 'touchstart') {
+        clientX = e.touches[0].clientX;
+    } else {
+        clientX = e.clientX;
+    }
+    
+    // Bounds check relative to window
+    if (clientX < window.innerWidth / 2) {
+        isSteeringLeft = true;
+        isSteeringRight = false;
+    } else {
+        isSteeringRight = true;
+        isSteeringLeft = false;
+    }
+}
+
+function handleInputEnd() {
+    isSteeringLeft = false;
+    isSteeringRight = false;
+}
+
+// Button actions
+document.getElementById('start-btn').addEventListener('click', startGame);
+document.getElementById('restart-btn').addEventListener('click', restartGame);
+
+function startGame() {
+    document.getElementById('start-screen').classList.add('hidden');
+    gameStarted = true;
+    audioSynth.start();
+    initGame();
+}
+
+function restartGame() {
+    document.getElementById('gameover-screen').classList.add('hidden');
+    gameOver = false;
+    audioSynth.start();
+    initGame();
+}
+
+function initGame() {
+    player = {
+        x: 0,
+        vx: 0,
+        roll: 0,
+        targetRoll: 0
+    };
+    
+    // Clear obstacles
+    obstacles.forEach(obs => scene.remove(obs.mesh));
+    obstacles = [];
+    
+    // Clear particles
+    for (let i = 0; i < maxParticles; i++) {
+        particles[i].active = false;
+    }
+    
+    // Clear gates
+    gates.forEach(g => scene.remove(g.mesh));
+    gates = [];
+
+    score = 0;
+    gameSpeed = CONFIG.SPEED.START;
+    timeScale = 1.0;
+    comboCount = 0;
+    comboTimer = 0.0;
+    frameCount = 0;
+    resetCamera(camera);
+    
+    currentStageIndex = 0;
+    updateStageVisuals(CONFIG.STAGES[0]);
+    
+    // Reset Hamiltonian node chain
+    hamiltonianIndex = 0;
+    feverActive = false;
+    feverTimer = 0.0;
+    document.getElementById('node-panel').classList.remove('hidden');
+    updateNodeUI();
+    
+    // Reset play stats telemetry
+    statsNodesHit = 0;
+    statsNodesMissed = 0;
+    statsFeverCount = 0;
+    
+    shipGroup.position.set(0, 0.25, -5);
+    shipGroup.scale.set(1, 1, 1);
+    
+    isSteeringLeft = false;
+    isSteeringRight = false;
+    
+    updateScoreUI();
+    updateComboUI();
+    
+    showFloatingText("SYSTEM INIT", "cyan-glow");
+}
+
+function triggerWallBounce(isLeft) {
+    audioSynth.playBounce();
+    addCameraShake(CONFIG.MECHANICS.BOUNCE_SHAKE, CONFIG.MECHANICS.BOUNCE_SHAKE_MAX);
+    triggerFlash(CONFIG.COLORS.BOUNCE_FLASH, CONFIG.MECHANICS.BOUNCE_FLASH);
+    showFloatingText("DRIFT BOUNCE", "pink-glow");
+    
+    // Sparks shower at the impact wall
+    let sparkX = isLeft ? -CONFIG.ASSETS.LASER_X : CONFIG.ASSETS.LASER_X;
+    
+    const minSparkVx = 0.02; // Minimum lateral velocity multiplier
+    const sparkVxRange = 0.07; // Deviation lateral velocity range
+    const maxSparkVy = 0.03; // Vertical velocity range
+    const maxSparkVz = 0.03; // Forward/backward depth velocity range
+    const baseLifespan = 15; // Base particle lifespan in frames
+    const lifespanRange = 15; // Random lifespan variation range
+    
+    for (let i = 0; i < CONFIG.MECHANICS.BOUNCE_SPARKS; i++) {
+        spawnParticle(
+            sparkX,
+            CONFIG.MECHANICS.BOUNCE_SPARK_HEIGHT,
+            shipGroup.position.z,
+            (isLeft ? 1 : -1) * (minSparkVx + Math.random() * sparkVxRange), // Shoot sparks inwards
+            (Math.random() - 0.5) * maxSparkVy, // Random vertical dispersion centering around 0
+            (Math.random() - 0.5) * maxSparkVz, // Random depth dispersion centering around 0
+            CONFIG.COLORS.BOUNCE_SPARK[0], CONFIG.COLORS.BOUNCE_SPARK[1], CONFIG.COLORS.BOUNCE_SPARK[2], // Cyan spark color (RGB)
+            baseLifespan + Math.random() * lifespanRange
+        );
+    }
+}
+
+function triggerNearMiss(obs) {
+    audioSynth.playDodge();
+    addCameraShake(CONFIG.MECHANICS.MISS_SHAKE, CONFIG.MECHANICS.MISS_SHAKE_MAX);
+    timeScale = CONFIG.MECHANICS.MISS_TIME_SCALE; // Bullet-time slow motion!
+    
+    comboCount++;
+    comboTimer = comboDuration;
+    
+    let bonus = CONFIG.MECHANICS.MISS_SCORE_BASE * comboCount;
+    score += bonus;
+    
+    triggerFlash(CONFIG.COLORS.NEAR_MISS_FLASH, CONFIG.MECHANICS.MISS_FLASH_OPACITY);
+    showFloatingText(`NEAR MISS +${bonus}`, "yellow-glow");
+    updateScoreUI();
+    updateComboUI();
+    
+    // Spawn radial gold sparks
+    spawnNearMissSparks(shipGroup.position.x, shipGroup.position.y, shipGroup.position.z);
+    
+    // Temporarily flash player wing colors
+    // We get a reference to the wingMesh inside player's group
+    const wing = shipGroup.children.find(child => child.geometry && child.geometry.type === 'BoxGeometry');
+    if (wing) {
+        wing.material.emissive.setHex(CONFIG.COLORS.NEAR_MISS_WING_FLASH);
+        setTimeout(() => {
+            if (!gameOver) wing.material.emissive.setHex(CONFIG.COLORS.NEAR_MISS_WING_BASE);
+        }, CONFIG.MECHANICS.MISS_FLASH_DURATION);
+    }
+}
+
+function triggerGameOver() {
+    gameOver = true;
+    audioSynth.stop();
+    
+    // Play dramatic explosion synth
+    audioSynth.playExplosion();
+    
+    setCameraShake(CONFIG.MECHANICS.END_SHAKE);
+    triggerFlash(CONFIG.COLORS.GAME_OVER_FLASH, CONFIG.MECHANICS.END_FLASH_OPACITY);
+    
+    // Spawn massive particle explosion (RGB color matching GAME_OVER_EXPLOSION config)
+    spawnExplosion(
+        shipGroup.position.x, 
+        shipGroup.position.y, 
+        shipGroup.position.z, 
+        CONFIG.COLORS.GAME_OVER_EXPLOSION[0], 
+        CONFIG.COLORS.GAME_OVER_EXPLOSION[1], 
+        CONFIG.COLORS.GAME_OVER_EXPLOSION[2], 
+        CONFIG.MECHANICS.END_EXPLOSION_COUNT
+    );
+    
+    // Scale ship down to 0, 0, 0 (simulate shattered destruction)
+    shipGroup.scale.set(0, 0, 0);
+    
+    // Save high score
+    if (score > highScore) {
+        highScore = score;
+        localStorage.setItem('hype_dodger_high', highScore);
+    }
+    
+    // Evaluate accuracy and letter grade
+    let accuracy = 0;
+    const totalNodes = statsNodesHit + statsNodesMissed;
+    if (totalNodes > 0) {
+        accuracy = Math.round((statsNodesHit / totalNodes) * 100);
+    }
+    
+    let grade = "D";
+    if (accuracy >= 85 && score >= 8000) grade = "S";
+    else if (accuracy >= 70 && score >= 4000) grade = "A";
+    else if (accuracy >= 50 && score >= 2000) grade = "B";
+    else if (accuracy >= 30 && score >= 1000) grade = "C";
+    
+    // Update summary elements
+    document.getElementById('stats-accuracy').innerText = `${accuracy}%`;
+    document.getElementById('stats-nodes').innerText = `${statsNodesHit} / ${totalNodes}`;
+    document.getElementById('stats-fever').innerText = statsFeverCount;
+    
+    const gradeEl = document.getElementById('stats-grade');
+    gradeEl.innerText = grade;
+    gradeEl.style.color = (grade === 'S' || grade === 'A') ? '#00ffcc' : '#ff0055';
+    gradeEl.style.textShadow = (grade === 'S' || grade === 'A') 
+        ? '0 0 15px rgba(0, 255, 204, 0.8)' 
+        : '0 0 15px rgba(255, 0, 85, 0.8)';
+    
+    // Record run stats to localStorage history log
+    let history = [];
+    try {
+        const saved = localStorage.getItem('hype_dodger_runs');
+        if (saved) history = JSON.parse(saved);
+    } catch (e) {
+        console.warn("Could not read runs history:", e);
+    }
+    
+    history.push({
+        date: new Date().toLocaleString(),
+        score: score,
+        accuracy: `${accuracy}%`,
+        grade: grade,
+        feverCycles: statsFeverCount
+    });
+    
+    try {
+        localStorage.setItem('hype_dodger_runs', JSON.stringify(history));
+    } catch (e) {
+        console.warn("Could not save runs history:", e);
+    }
+    
+    // Output structured table list to developer console
+    console.clear();
+    console.log("%c=== RETRO PLAYTEST RUNS TELEMETRY LOG ===", "color: #ffcc00; font-weight: bold; font-size: 13px;");
+    console.table(history);
+    
+    // Configure optional feedback submission button
+    const telemetryBtn = document.getElementById('telemetry-btn');
+    if (telemetryBtn) {
+        telemetryBtn.onclick = () => {
+            const prefillUrl = `${CONFIG.TELEMETRY.FORM_URL}?${CONFIG.TELEMETRY.ENTRY_SCORE}=${encodeURIComponent(score)}&${CONFIG.TELEMETRY.ENTRY_ACCURACY}=${encodeURIComponent(accuracy + '%')}&${CONFIG.TELEMETRY.ENTRY_GRADE}=${encodeURIComponent(grade)}&${CONFIG.TELEMETRY.ENTRY_FEVER}=${encodeURIComponent(statsFeverCount)}`;
+            window.open(prefillUrl, '_blank');
+        };
+    }
+    
+    // Show game over overlay
+    document.getElementById('final-score').innerText = score;
+    document.getElementById('final-best').innerText = highScore;
+    document.getElementById('gameover-screen').classList.remove('hidden');
+    document.getElementById('node-panel').classList.add('hidden');
+}
+
+// --- Obstacle Spawner ---
+function spawnObstacle(customX = null, customZ = null) {
+    let size = CONFIG.OBSTACLES.SIZE_MIN + Math.random() * CONFIG.OBSTACLES.SIZE_RANGE;
+    let geom;
+    let type = Math.floor(Math.random() * 3); // 3 different shape variants
+    
+    if (type === 0) {
+        geom = new THREE.OctahedronGeometry(size);
+    } else if (type === 1) {
+        geom = new THREE.ConeGeometry(
+            size * 0.65, // base width relative scalar
+            size * 1.4,  // height relative scalar
+            4            // 4 radial segments to make it look like a wireframe pyramid
+        );
+        geom.rotateX(Math.PI); // Orient point downwards
+    } else {
+        geom = new THREE.BoxGeometry(
+            size * 1.1,  // Box width relative scale
+            size * 1.1,  // Box height relative scale
+            size * 1.1   // Box depth relative scale
+        );
+    }
+    
+    // Neon emissive standard material
+    const obsMat = new THREE.MeshStandardMaterial({
+        color: 0xff0055,   // Obstacle base neon pink color
+        emissive: 0x440011, // Dark red glow
+        roughness: 0.1,    // Glossy finish
+        metalness: 0.8     // Metallic reflectiveness
+    });
+    
+    const mesh = new THREE.Mesh(geom, obsMat);
+    // Randomized lateral positioning across lanes
+    mesh.position.set(
+        customX !== null ? customX : (Math.random() - 0.5) * CONFIG.OBSTACLES.SPAN_X,
+        size / 2, // Sit exactly flush on road base
+        customZ !== null ? customZ : CONFIG.OBSTACLES.SPAWN_Z
+    );
+    scene.add(mesh);
+    
+    obstacles.push({
+        mesh: mesh,
+        passed: false,
+        rx: (Math.random() - 0.5) * CONFIG.OBSTACLES.ROT_MAX,
+        ry: (Math.random() - 0.5) * CONFIG.OBSTACLES.ROT_MAX,
+        rz: (Math.random() - 0.5) * CONFIG.OBSTACLES.ROT_MAX
+    });
+}
+
+// --- Math Gates Spawner ---
+function createGateTexture(text, isPositive) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    
+    ctx.clearRect(0, 0, 256, 256);
+    
+    // Translucent background fill
+    ctx.fillStyle = isPositive ? 'rgba(0, 255, 204, 0.12)' : 'rgba(255, 0, 85, 0.12)';
+    ctx.fillRect(0, 0, 256, 256);
+    
+    // Glowing stroke border
+    ctx.lineWidth = 14;
+    ctx.strokeStyle = isPositive ? CONFIG.COLORS.GATE_POSITIVE_BORDER : CONFIG.COLORS.GATE_NEGATIVE_BORDER;
+    ctx.strokeRect(7, 7, 242, 242);
+    
+    // Render operational label
+    ctx.font = 'bold 72px "Outfit", Arial';
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    
+    // Soft shadow glow
+    ctx.shadowColor = isPositive ? CONFIG.COLORS.GATE_POSITIVE_BORDER : CONFIG.COLORS.GATE_NEGATIVE_BORDER;
+    ctx.shadowBlur = 18;
+    
+    ctx.fillText(text, 128, 128);
+    
+    const texture = new THREE.CanvasTexture(canvas);
+    return texture;
+}
+
+function createGateMesh(x, op) {
+    const isPositive = op.type === 'mult' || op.type === 'add';
+    const texture = createGateTexture(op.label, isPositive);
+    
+    const geom = new THREE.PlaneGeometry(CONFIG.GATES.WIDTH, CONFIG.GATES.HEIGHT);
+    const mat = new THREE.MeshBasicMaterial({
+        map: texture,
+        transparent: true,
+        opacity: CONFIG.GATES.OPACITY,
+        side: THREE.DoubleSide
+    });
+    
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.position.set(x, CONFIG.GATES.HEIGHT / 2, CONFIG.GATES.SPAWN_Z);
+    
+    return {
+        mesh: mesh,
+        op: op,
+        passed: false
+    };
+}
+
+function spawnGatePair() {
+    // 50% chance to spawn a Hamiltonian Node challenge gate, 50% chance for a standard math gate
+    const isHamiltonianChallenge = Math.random() < 0.5;
+    
+    if (isHamiltonianChallenge && !feverActive) {
+        // Correct next node in cycle
+        const correctNode = CONFIG.HAMILTONIAN_CYCLE[hamiltonianIndex];
+        
+        // Find a random incorrect node (not matching the correct one)
+        let incorrectNode = correctNode;
+        while (incorrectNode === correctNode) {
+            const randIdx = Math.floor(Math.random() * CONFIG.HAMILTONIAN_CYCLE.length);
+            incorrectNode = CONFIG.HAMILTONIAN_CYCLE[randIdx];
+        }
+        
+        const isLeftCorrect = Math.random() < 0.5;
+        
+        const leftOp = isLeftCorrect 
+            ? { type: 'hamiltonian_correct', val: 0, label: `NODE ${correctNode}` } 
+            : { type: 'hamiltonian_incorrect', val: 0, label: `NODE ${incorrectNode}` };
+        const rightOp = isLeftCorrect 
+            ? { type: 'hamiltonian_incorrect', val: 0, label: `NODE ${incorrectNode}` } 
+            : { type: 'hamiltonian_correct', val: 0, label: `NODE ${correctNode}` };
+            
+        const leftGate = createGateMesh(-CONFIG.GATES.LANE_X, leftOp);
+        const rightGate = createGateMesh(CONFIG.GATES.LANE_X, rightOp);
+        
+        scene.add(leftGate.mesh);
+        scene.add(rightGate.mesh);
+        
+        gates.push(leftGate);
+        gates.push(rightGate);
+        
+        // Hazard block behind the correct node!
+        const spawnHazardBehindSuccess = Math.random() < 0.85;
+        if (spawnHazardBehindSuccess) {
+            const correctLaneX = isLeftCorrect ? -CONFIG.GATES.LANE_X : CONFIG.GATES.LANE_X;
+            const hazardDistanceBehind = 18;
+            spawnObstacle(correctLaneX, CONFIG.GATES.SPAWN_Z - hazardDistanceBehind);
+        }
+        return;
+    }
+
+    const isLeftPositive = Math.random() < 0.5;
+    
+    // Set positive ops
+    const positiveOps = [
+        { type: 'mult', val: 2, label: 'x2' },
+        { type: 'add', val: 50, label: '+50' },
+        { type: 'add', val: 100, label: '+100' }
+    ];
+    // Set negative ops
+    const negativeOps = [
+        { type: 'div', val: 2, label: '/2' },
+        { type: 'sub', val: 50, label: '-50' },
+        { type: 'sub', val: 100, label: '-100' }
+    ];
+    
+    const leftOp = isLeftPositive ? positiveOps[Math.floor(Math.random() * positiveOps.length)] : negativeOps[Math.floor(Math.random() * negativeOps.length)];
+    const rightOp = isLeftPositive ? negativeOps[Math.floor(Math.random() * negativeOps.length)] : positiveOps[Math.floor(Math.random() * positiveOps.length)];
+    
+    const leftGate = createGateMesh(-CONFIG.GATES.LANE_X, leftOp);
+    const rightGate = createGateMesh(CONFIG.GATES.LANE_X, rightOp);
+    
+    scene.add(leftGate.mesh);
+    scene.add(rightGate.mesh);
+    
+    gates.push(leftGate);
+    gates.push(rightGate);
+    
+    // Spawning hazard blocks directly behind the positive gate
+    const spawnHazardBehindSuccess = Math.random() < 0.8;
+    if (spawnHazardBehindSuccess) {
+        const positiveLaneX = isLeftPositive ? -CONFIG.GATES.LANE_X : CONFIG.GATES.LANE_X;
+        const hazardDistanceBehind = 18; // units behind the gate
+        spawnObstacle(positiveLaneX, CONFIG.GATES.SPAWN_Z - hazardDistanceBehind);
+    }
+}
+
+function applyGateEffect(op) {
+    if (op.type === 'add') {
+        score += op.val;
+        comboCount++;
+        comboTimer = comboDuration;
+        showFloatingText(`+${op.val}`, "cyan-glow");
+        audioSynth.playDodge();
+        triggerFlash(CONFIG.COLORS.GATE_POSITIVE_BG, 0.12);
+    } else if (op.type === 'mult') {
+        score *= op.val;
+        comboCount += 2; // Extra reward combo bump
+        comboTimer = comboDuration;
+        showFloatingText(`x${op.val}`, "yellow-glow");
+        audioSynth.playDodge();
+        triggerFlash(CONFIG.COLORS.GATE_POSITIVE_BG, 0.22);
+    } else if (op.type === 'sub') {
+        score = Math.max(0, score - op.val);
+        comboCount = 0; // Break combo chain
+        showFloatingText(`-${op.val}`, "pink-glow");
+        audioSynth.playBounce();
+        triggerFlash(CONFIG.COLORS.GATE_NEGATIVE_BG, 0.12);
+    } else if (op.type === 'div') {
+        score = Math.floor(score / op.val);
+        comboCount = 0; // Break combo chain
+        showFloatingText(`/${op.val}`, "pink-glow");
+        audioSynth.playBounce();
+        triggerFlash(CONFIG.COLORS.GATE_NEGATIVE_BG, 0.22);
+    } else if (op.type === 'hamiltonian_correct') {
+        hamiltonianIndex = (hamiltonianIndex + 1) % CONFIG.HAMILTONIAN_CYCLE.length;
+        score += 100; // Reward for node capture
+        comboCount++;
+        comboTimer = comboDuration;
+        showFloatingText(`NODE CAPTURED`, "cyan-glow");
+        audioSynth.playDodge();
+        triggerFlash(CONFIG.COLORS.GATE_POSITIVE_BG, 0.15);
+        
+        statsNodesHit++;
+        
+        if (hamiltonianIndex === 0) {
+            // Cycle complete! Trigger Fever Mode
+            feverActive = true;
+            feverTimer = CONFIG.FEVER.DURATION;
+            score += CONFIG.FEVER.SCORE_BONUS;
+            showFloatingText(`SINGULARITY FEVER!`, "yellow-glow");
+            triggerFlash(CONFIG.FEVER.FLASH_COLOR, 0.45);
+            audioSynth.playDodge();
+            setTimeout(() => { if (!gameOver) audioSynth.playDodge(); }, 100);
+            setTimeout(() => { if (!gameOver) audioSynth.playDodge(); }, 200);
+            statsFeverCount++;
+        }
+        updateNodeUI();
+    } else if (op.type === 'hamiltonian_incorrect') {
+        hamiltonianIndex = 0; // Reset chain
+        showFloatingText(`CHAIN BROKEN!`, "pink-glow");
+        audioSynth.playBounce();
+        triggerFlash(CONFIG.COLORS.GATE_NEGATIVE_BG, 0.2);
+        statsNodesMissed++;
+        updateNodeUI();
+    }
+    
+    updateScoreUI();
+    updateComboUI();
+}
+
+function updateNodeUI() {
+    const nextNode = CONFIG.HAMILTONIAN_CYCLE[hamiltonianIndex];
+    const totalNodes = CONFIG.HAMILTONIAN_CYCLE.length;
+    document.getElementById('node-text').innerText = `${nextNode} (${hamiltonianIndex}/${totalNodes})`;
+}
+
+function checkStageProgression() {
+    // Search for the highest stage threshold we qualify for
+    let nextStageIndex = 0;
+    for (let i = 0; i < CONFIG.STAGES.length; i++) {
+        if (score >= CONFIG.STAGES[i].threshold) {
+            nextStageIndex = i;
+        }
+    }
+    
+    if (nextStageIndex !== currentStageIndex) {
+        currentStageIndex = nextStageIndex;
+        const stage = CONFIG.STAGES[currentStageIndex];
+        
+        // Display massive overlay stage upgrade alert banner
+        showFloatingText(`STAGE ${currentStageIndex + 1}: ${stage.name}`, "yellow-glow");
+        
+        // Dramatic level-up screen flash using stage theme color
+        triggerFlash(stage.laserLeft, 0.35);
+        
+        // Double synth chime sound alert
+        audioSynth.playDodge();
+        setTimeout(() => {
+            if (!gameOver) audioSynth.playDodge();
+        }, 120);
+        
+        // Transition scene styling to match stage theme
+        updateStageVisuals(stage);
+    }
+}
+
+function updateStageVisuals(stage) {
+    // Update scene fog coloring and thickness
+    scene.fog.color.set(stage.fogColor);
+    scene.fog.density = stage.fogDensity;
+    renderer.setClearColor(stage.fogColor);
+    
+    // Shift glowing side highway laser barriers
+    leftLaser.material.color.set(stage.laserLeft);
+    rightLaser.material.color.set(stage.laserRight);
+    
+    // Tint sunset circle to match stage theme
+    sunsetMesh.material.color.set(stage.sunTint);
+    
+    // Update direct sunlight to project laser color
+    dirLight.color.set(stage.laserLeft);
+}
+
+// --- Renderer Resizing ---
+function resize() {
+    let width = window.innerWidth;
+    let height = window.innerHeight;
+    const aspect = 9 / 16; // Standard mobile/arcade portrait target aspect ratio
+    
+    if (width / height > aspect) {
+        width = height * aspect;
+    } else {
+        height = width / aspect;
+    }
+    
+    renderer.setSize(width, height);
+    renderer.domElement.style.width = width + 'px';
+    renderer.domElement.style.height = height + 'px';
+}
+window.addEventListener('resize', resize);
+resize();
+
+// --- Core Game Loop ---
+let lastTime = 0; // Tracks timestamp of the last executed loop iteration
+
+function gameLoop(currentTime) {
+    requestAnimationFrame(gameLoop);
+    
+    let dt = (currentTime - lastTime) / 1000; // Convert millisecond timestamp delta to seconds
+    if (dt > CONFIG.SYSTEM.MAX_DT) dt = CONFIG.SYSTEM.MAX_DT; // Cap time delta to prevent giant leaps through walls
+    lastTime = currentTime;
+    
+    if (!gameStarted) {
+        // Run passive render so scene looks alive
+        gridTexture.offset.y -= CONFIG.SYSTEM.PASSIVE_SCROLL;
+        renderer.render(scene, camera);
+        return;
+    }
+    
+    // 1. Time dilation update (slow-motion recovery)
+    const baseTimeScale = 1.0; // standard timescale unit representing 100% speed
+    if (timeScale < baseTimeScale) {
+        timeScale += (baseTimeScale - timeScale) * CONFIG.ENGINE.DILATION_REC;
+        if (timeScale > 0.99) timeScale = baseTimeScale; // snap back to full speed when close enough
+    }
+    
+    // Update synth audio state
+    audioSynth.update(gameSpeed, player.vx);
+    
+    if (!gameOver) {
+        frameCount++;
+        
+        if (feverActive) {
+            feverTimer -= dt * timeScale;
+            
+            // Fast rainbow HSL shift during Fever mode
+            const hue = (frameCount * 4) % 360;
+            const rainbowColor = new THREE.Color(`hsl(${hue}, 100%, 50%)`);
+            leftLaser.material.color.copy(rainbowColor);
+            rightLaser.material.color.copy(rainbowColor);
+            sunsetMesh.material.color.copy(rainbowColor);
+            dirLight.color.copy(rainbowColor);
+            
+            if (feverTimer <= 0) {
+                feverActive = false;
+                // Restore normal stage visuals
+                updateStageVisuals(CONFIG.STAGES[currentStageIndex]);
+                showFloatingText(`FEVER OVER`, "pink-glow");
+            }
+        }
+        
+        // 2. Player horizontal drift physics
+        if (isSteeringLeft) {
+            player.vx -= CONFIG.PLAYER.ACCEL;
+            player.targetRoll = 0.45; // target left visual wing tilt roll angle in radians
+        } else if (isSteeringRight) {
+            player.vx += CONFIG.PLAYER.ACCEL;
+            player.targetRoll = -0.45; // target right visual wing tilt roll angle in radians
+        } else {
+            player.vx *= CONFIG.PLAYER.DRAG;
+            player.targetRoll = 0.0; // reset roll tilt to level when idle
+        }
+        
+        // Max lateral drift speed
+        if (player.vx < -CONFIG.PLAYER.MAX_VX) player.vx = -CONFIG.PLAYER.MAX_VX;
+        if (player.vx > CONFIG.PLAYER.MAX_VX) player.vx = CONFIG.PLAYER.MAX_VX;
+        
+        player.x += player.vx * timeScale;
+        
+        // Wall elastic boundaries
+        if (player.x < -CONFIG.PLAYER.BORDER) {
+            player.x = -CONFIG.PLAYER.BORDER;
+            player.vx = -player.vx * CONFIG.PLAYER.ELASTICITY; // reverse velocity elastically
+            triggerWallBounce(true); // Bounce off left wall
+        } else if (player.x > CONFIG.PLAYER.BORDER) {
+            player.x = CONFIG.PLAYER.BORDER;
+            player.vx = -player.vx * CONFIG.PLAYER.ELASTICITY; // reverse velocity elastically
+            triggerWallBounce(false); // Bounce off right wall
+        }
+        
+        // Smooth out wing roll rotation and translate position
+        player.roll += (player.targetRoll - player.roll) * CONFIG.PLAYER.ROLL_SMOOTH;
+        shipGroup.position.x = player.x;
+        shipGroup.rotation.z = player.roll;
+        shipGroup.rotation.y = player.vx * CONFIG.PLAYER.YAW_TILT; // yaw tilt
+        
+        // Continuous speed increase with acceleration and clamping
+        gameSpeed = Math.min(gameSpeed + CONFIG.SPEED.ACCEL * timeScale, CONFIG.SPEED.MAX);
+        
+        // Scale velocity based on the current stage speed scale configuration (boosted in Fever mode)
+        const feverSpeedMultiplier = feverActive ? 1.5 : 1.0;
+        const activeSpeed = gameSpeed * CONFIG.STAGES[currentStageIndex].speedScale * feverSpeedMultiplier;
+        
+        // 3. Grid texture animation
+        gridTexture.offset.y -= activeSpeed * CONFIG.ENGINE.SCROLL_ACTIVE * timeScale;
+        
+        // 4. Obstacle spawning (faster as gameSpeed increases)
+        let spawnThreshold = Math.max(CONFIG.ENGINE.SPAWN_LIMIT_MIN, Math.floor(CONFIG.ENGINE.SPAWN_LIMIT_MAX - gameSpeed * CONFIG.ENGINE.SPAWN_SPEED_SCALE));
+        if (frameCount % spawnThreshold === 0) {
+            spawnObstacle();
+        }
+        
+        // Spawn math gates at separate intervals
+        if (frameCount % CONFIG.GATES.SPAWN_INTERVAL === 0) {
+            spawnGatePair();
+        }
+        
+        // 5. Update Combo timer decay
+        if (comboCount > 0) {
+            comboTimer -= dt * timeScale;
+            if (comboTimer <= 0) {
+                comboCount = 0;
+                updateComboUI();
+                showFloatingText("COMBO RESET", "pink-glow");
+            } else {
+                let pct = (comboTimer / comboDuration) * 100; // convert ratio to percentage for progress bar width
+                document.getElementById('combo-progress-fill').style.width = `${pct}%`;
+            }
+        }
+        
+        // 6. Spawn exhaust engine particles
+        let trailCol = CONFIG.COLORS.DEFAULT_EXHAUST; // Default cyan exhaust colors (RGB)
+        if (comboCount >= 5) {
+            trailCol = CONFIG.COLORS.HIGH_COMBO_EXHAUST; // Neon pink exhaust on high combo streaks
+        } else if (comboCount >= 2) {
+            trailCol = CONFIG.COLORS.MID_COMBO_EXHAUST; // Retro orange exhaust on minor combo streaks
+        }
+        
+        // Define particle spawning offsets and dispersion bounds
+        const shipExhaustXSpread = 0.15; // ship engine exhaust spawn width variance
+        const shipExhaustYOffset = -0.08; // engine nozzle Y height offset
+        const shipExhaustZOffset = 0.95; // engine nozzle Z depth offset
+        const lateralDispersionVx = 0.04; // random particle side speed disperser
+        const backwardBaseVz = 0.15; // base particle backward velocity
+        const backwardVarVz = 0.12; // backward velocity random range
+        const particleBaseLife = 25; // base life duration in frames
+        const particleVarLife = 20; // life variation range in frames
+
+        spawnParticle(
+            shipGroup.position.x + (Math.random() - 0.5) * shipExhaustXSpread,
+            shipGroup.position.y + shipExhaustYOffset,
+            shipGroup.position.z + shipExhaustZOffset,
+            (Math.random() - 0.5) * lateralDispersionVx,
+            (Math.random() - 0.5) * lateralDispersionVx,
+            backwardBaseVz + Math.random() * backwardVarVz, // shoot backwards
+            trailCol[0], trailCol[1], trailCol[2],
+            particleBaseLife + Math.random() * particleVarLife
+        );
+    }
+    
+    // 7. Update Obstacles
+    for (let i = 0; i < obstacles.length; i++) {
+        let obs = obstacles[i];
+        
+        if (!gameOver) {
+            // Obstacles fly down Z axis
+            const activeSpeed = gameSpeed * CONFIG.STAGES[currentStageIndex].speedScale;
+            obs.mesh.position.z += activeSpeed * timeScale;
+            
+            // Spin obstacles
+            obs.mesh.rotation.x += obs.rx * timeScale;
+            obs.mesh.rotation.y += obs.ry * timeScale;
+            obs.mesh.rotation.z += obs.rz * timeScale;
+            
+            // Pulsate/breathe obstacles on a synthesizer speed beat
+            let beatScale = 1.0 + 0.08 * Math.sin(frameCount * 0.15);
+            obs.mesh.scale.set(beatScale, beatScale, beatScale);
+            
+            // Collision Check (bounding box logic, bypassed if Fever Mode is active)
+            let dx = Math.abs(shipGroup.position.x - obs.mesh.position.x);
+            let dz = Math.abs(shipGroup.position.z - obs.mesh.position.z);
+            
+            if (!feverActive && dx < CONFIG.COLLISION.BOX_X && dz < CONFIG.COLLISION.BOX_Z) {
+                triggerGameOver();
+            }
+            // Near Miss Mechanic
+            else if (!obs.passed && obs.mesh.position.z > shipGroup.position.z) {
+                obs.passed = true;
+                if (dx < CONFIG.COLLISION.NEAR_MISS_DIST) {
+                    triggerNearMiss(obs);
+                } else {
+                     // Safe evade
+                     score += CONFIG.COLLISION.EVADE_SCORE;
+                     updateScoreUI();
+                }
+            }
+        }
+        
+        // Remove obstacles that have flown past the camera viewport
+        if (obs.mesh.position.z > CONFIG.COLLISION.DESPAWN_Z) {
+            scene.remove(obs.mesh);
+            obstacles.splice(i, 1);
+            i--;
+        }
+    }
+    
+    // 7b. Update Gates
+    for (let i = 0; i < gates.length; i++) {
+        let gate = gates[i];
+        
+        if (!gameOver) {
+            // Gates fly down Z axis
+            const activeSpeed = gameSpeed * CONFIG.STAGES[currentStageIndex].speedScale;
+            gate.mesh.position.z += activeSpeed * timeScale;
+            
+            // Collision Check (bounding box logic)
+            let dx = Math.abs(shipGroup.position.x - gate.mesh.position.x);
+            let dz = Math.abs(shipGroup.position.z - gate.mesh.position.z);
+            
+            if (!gate.passed && dx < (CONFIG.GATES.WIDTH / 2 + 0.2) && dz < 1.0) {
+                // Mark both gates in the pair as collected to prevent double-resets or despawn misses
+                gates.forEach(g => {
+                    if (Math.abs(g.mesh.position.z - gate.mesh.position.z) < 2.0) {
+                        g.passed = true;
+                    }
+                });
+                
+                applyGateEffect(gate.op);
+                
+                // Fade out/scale down visual gate
+                let scaleVal = 1.0;
+                const shrinkAnim = setInterval(() => {
+                    scaleVal -= 0.15;
+                    if (scaleVal <= 0.0) {
+                        clearInterval(shrinkAnim);
+                        scene.remove(gate.mesh);
+                    } else {
+                        gate.mesh.scale.set(scaleVal, scaleVal, scaleVal);
+                    }
+                }, 16);
+            }
+        }
+        
+        // Remove gates that have flown past the camera viewport
+        if (gate.mesh.position.z > CONFIG.COLLISION.DESPAWN_Z) {
+            // Penalize player if they missed the correct gate entirely
+            if (!gate.passed && gate.op.type === 'hamiltonian_correct') {
+                statsNodesMissed++;
+                hamiltonianIndex = 0; // break chain
+                updateNodeUI();
+                showFloatingText("CHAIN RESET", "pink-glow");
+            }
+            scene.remove(gate.mesh);
+            gates.splice(i, 1);
+            i--;
+        }
+    }
+    
+    // 7c. Check Stage Progression
+    if (!gameOver) {
+        checkStageProgression();
+    }
+    
+    // 8. Update active particle systems and speed lines
+    updateParticles(timeScale);
+    const activeSpeed = gameSpeed * CONFIG.STAGES[currentStageIndex].speedScale;
+    updateSpeedLines(activeSpeed, timeScale);
+    
+    // 9. Camera positioning (slight dynamic lag trailing the player lateral position) using modular controller
+    updateCamera(camera, player.x);
+    
+    renderer.render(scene, camera);
+}
+
+// Start loop (will rendering background passively until tap start)
+requestAnimationFrame(gameLoop);
