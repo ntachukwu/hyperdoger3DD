@@ -29,8 +29,6 @@ body {
 
 canvas {
     display: block;
-    box-shadow: 0 0 50px rgba(157, 0, 255, 0.4);
-    border-radius: 12px;
 }
 
 /* Scanline CRT overlay for classic arcade aesthetic */
