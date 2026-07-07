@@ -1250,7 +1250,14 @@ function gameLoop(currentTime) {
         
         // 4. Obstacle Spawning (bypassed in Tutorial Mode)
         if (!inTutorial) {
-            let spawnThreshold = Math.max(CONFIG.ENGINE.SPAWN_LIMIT_MIN, Math.floor(CONFIG.ENGINE.SPAWN_LIMIT_MAX - gameSpeed * CONFIG.ENGINE.SPAWN_SPEED_SCALE));
+            // Difficulty factor based on frames survived: 0.0 (start) to 1.0 (after 10 minutes)
+            const diffFactor = Math.min(1.0, frameCount / CONFIG.ENGINE.DIFFICULTY_DURATION);
+            
+            // Spawn interval decreases smoothly over time (spacing shrinks)
+            let spawnThreshold = Math.floor(
+                CONFIG.ENGINE.SPAWN_LIMIT_MAX - diffFactor * (CONFIG.ENGINE.SPAWN_LIMIT_MAX - CONFIG.ENGINE.SPAWN_LIMIT_MIN)
+            );
+            
             if (frameCount % spawnThreshold === 0) {
                 spawnObstacle();
             }

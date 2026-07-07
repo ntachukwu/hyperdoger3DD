@@ -8,9 +8,10 @@ const CONFIG = {
     ENGINE: {
         DILATION_REC: 0.08,        // Timescale bullet-time recovery rate per frame
         SCROLL_ACTIVE: 0.045,      // Active road scrolling velocity scaling factor
-        SPAWN_LIMIT_MIN: 14,       // Minimum floor of frame spawn interval
-        SPAWN_LIMIT_MAX: 52,       // Baseline frame spawn interval for obstacles
-        SPAWN_SPEED_SCALE: 18      // Difficulty scaling speed factor for obstacle spawning
+        SPAWN_LIMIT_MIN: 32,       // Minimum floor of frame spawn interval (widened for playability)
+        SPAWN_LIMIT_MAX: 90,       // Baseline frame spawn interval for obstacles (widened)
+        SPAWN_SPEED_SCALE: 18,     // Legacy speed scale
+        DIFFICULTY_DURATION: 36000 // Cumulative frame count to reach maximum density (10 minutes)
     },
     PLAYER: {
         ACCEL: 0.07,       // Horizontal thrust acceleration force per input frame
