@@ -666,10 +666,14 @@ function spawnObstacle(customX = null, customZ = null) {
         );
     }
     
-    // Neon emissive standard material
+    // Select a random color from the retro neon palette
+    const obstacleColors = CONFIG.OBSTACLES.COLORS || [0xff0055];
+    const randColor = obstacleColors[Math.floor(Math.random() * obstacleColors.length)];
+    
+    // Neon emissive standard material using the randomized color
     const obsMat = new THREE.MeshStandardMaterial({
-        color: 0xff0055,   // Obstacle base neon pink color
-        emissive: 0x440011, // Dark red glow
+        color: randColor,
+        emissive: new THREE.Color(randColor).multiplyScalar(0.12),
         roughness: 0.1,    // Glossy finish
         metalness: 0.8     // Metallic reflectiveness
     });
@@ -681,11 +685,11 @@ function spawnObstacle(customX = null, customZ = null) {
     mesh.position.set(spawnX, size / 2, spawnZ);
     scene.add(mesh);
 
-    // Warning shadow — flat circle on grid, grows as obstacle approaches
+    // Warning shadow — flat circle on grid matching obstacle color
     const shadowGeom = new THREE.CircleGeometry(size * 0.85, 16);
     shadowGeom.rotateX(-Math.PI / 2);
     const shadowMat = new THREE.MeshBasicMaterial({
-        color: 0xff0055,
+        color: randColor,
         transparent: true,
         opacity: 0,
         depthWrite: false
@@ -694,8 +698,8 @@ function spawnObstacle(customX = null, customZ = null) {
     shadowMesh.position.set(spawnX, 0.02, spawnZ);
     scene.add(shadowMesh);
 
-    // Danger pulse light — red point light that pulses to scream "solid obstacle"
-    const dangerLight = new THREE.PointLight(0xff0022, 1.5, 5);
+    // Danger pulse light — colored point light matching obstacle
+    const dangerLight = new THREE.PointLight(randColor, 1.5, 5);
     dangerLight.position.set(spawnX, size / 2, spawnZ);
     scene.add(dangerLight);
 
@@ -703,6 +707,7 @@ function spawnObstacle(customX = null, customZ = null) {
         mesh: mesh,
         shadowMesh: shadowMesh,
         dangerLight: dangerLight,
+        color: randColor,
         passed: false,
         rx: (Math.random() - 0.5) * CONFIG.OBSTACLES.ROT_MAX,
         ry: (Math.random() - 0.5) * CONFIG.OBSTACLES.ROT_MAX,
@@ -1348,8 +1353,9 @@ function gameLoop(currentTime) {
             const shadowScale = 0.1 + t * 0.9;
             obs.shadowMesh.scale.set(shadowScale, shadowScale, shadowScale);
 
-            // B: Emissive ramp — dark far away, neon pink (0xff0055) up close
-            obs.mesh.material.emissive.setRGB(t * 1.0, 0, t * 0.333);
+            // B: Emissive ramp — dark far away, lights up with its specific color close up
+            const baseCol = new THREE.Color(obs.color || 0xff0055);
+            obs.mesh.material.emissive.copy(baseCol).multiplyScalar(t);
 
             // Danger pulse light — intensity throbs to signal solid obstacle
             obs.dangerLight.position.z = obs.mesh.position.z;

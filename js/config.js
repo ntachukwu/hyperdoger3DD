@@ -27,11 +27,12 @@ const CONFIG = {
         SIZE_RANGE: 0.45, // Size scale variation range
         SPAWN_Z: -80,     // Starting Z distance in the distance where obstacles appear
         SPAN_X: 8.0,      // Lateral width across which obstacles distribute
-        ROT_MAX: 0.05     // Maximum rotational delta per frame for animations
+        ROT_MAX: 0.05,    // Maximum rotational delta per frame for animations
+        COLORS: [0xff0055, 0xff5e00, 0xaaff00, 0x9d00ff] // Vibrant multi-color retro obstacle palette
     },
     GATES: {
         SPAWN_INTERVAL: 120, // Spawn gates every 120 frames
-        WIDTH: 2.2,          // Horizontal collision width
+        WIDTH: 1.5,          // Horizontal collision width (slimmer from 2.2)
         HEIGHT: 2.5,         // Visual panel height
         LANE_X: 2.2,         // Lane lateral coordinate offset (left/right)
         SPAWN_Z: -80,        // Inception depth where gates spawn
@@ -53,12 +54,12 @@ const CONFIG = {
     },
     CAMERA: {
         DECAY: 0.88,   // Frame decay factor of the camera shake effect
-        X_TRACK: 0.65, // Lateral tracking dampener
-        Y_BASE: 3.2,   // Baseline camera height from ground level (elevated from 2.4)
-        Z_BASE: 4.6,   // Camera follow distance behind player (pulled closer from 5.0)
-        X_LOOK: 0.45,  // Camera look target lateral dampener
-        Y_LOOK: 0.1,   // Camera focus point target height Y (pitched lower from 0.4)
-        Z_LOOK: -14.0  // Camera focus point target depth Z (extended from -10.0)
+        X_TRACK: 0.58, // Player follow position scalar on horizontal axis
+        Y_BASE: 2.4,   // Baseline camera height from ground level
+        Z_BASE: 5.0,   // Camera follow distance behind player
+        X_LOOK: 0.28,  // Focal focus point tracking scalar relative to player X
+        Y_LOOK: 0.4,   // Camera focus point target height Y
+        Z_LOOK: -10.0  // Camera focus point target depth Z
     },
     SPEED_LINES: {
         COUNT: 15,    // Count of instantiated lines for the warp effect
