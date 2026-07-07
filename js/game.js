@@ -104,6 +104,19 @@ let statsNodesHit = 0;    // Telemetry: correct node captures
 let statsNodesMissed = 0; // Telemetry: missed/incorrect node selections
 let statsFeverCount = 0;  // Telemetry: total fever activations triggered
 
+// Keyboard movement inputs
+let keyLeft = false;
+let keyRight = false;
+
+// Shield hitpoints
+let shieldHp = 2;
+
+// Tutorial progression state machine
+let inTutorial = false;
+let tutorialStep = 0;
+let tutorialCooldown = 0;    // Delays after completing a step
+let tutorialSpawned = false; // Ensures tutorial spawns only one obstacle/gate at a time
+
 // Node HUD progressive disclosure state machine
 // HIDDEN → FLASH (on NODE gate spawn) → PERSISTENT (on first correct hit)
 let nodeHudMode = 'HIDDEN'; // 'HIDDEN' | 'FLASH' | 'PERSISTENT'
@@ -151,6 +164,34 @@ function handleInputEnd() {
     isSteeringRight = false;
 }
 
+window.addEventListener('keydown', handleKeyDown);
+window.addEventListener('keyup', handleKeyUp);
+
+function handleKeyDown(e) {
+    if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+        keyLeft = true;
+        keyRight = false;
+    } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+        keyRight = true;
+        keyLeft = false;
+    } else if (e.code === 'Space') {
+        if (!gameStarted) {
+            startGame();
+        } else if (gameOver) {
+            restartGame();
+        }
+        e.preventDefault();
+    }
+}
+
+function handleKeyUp(e) {
+    if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+        keyLeft = false;
+    } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+        keyRight = false;
+    }
+}
+
 // Button actions
 document.getElementById('start-btn').addEventListener('click', startGame);
 document.getElementById('restart-btn').addEventListener('click', restartGame);
@@ -193,6 +234,21 @@ function startGame() {
     document.getElementById('start-screen').classList.add('hidden');
     gameStarted = true;
     audioSynth.start();
+
+    const tutorialDone = localStorage.getItem('hype_dodger_tutorial_done') === 'true';
+    if (!tutorialDone) {
+        inTutorial = true;
+        tutorialStep = 0;
+        tutorialCooldown = 0;
+        tutorialSpawned = false;
+        const banner = document.getElementById('tutorial-banner');
+        if (banner) banner.classList.remove('hidden');
+    } else {
+        inTutorial = false;
+        const banner = document.getElementById('tutorial-banner');
+        if (banner) banner.classList.add('hidden');
+    }
+
     initGame();
 }
 
@@ -200,6 +256,21 @@ function restartGame() {
     document.getElementById('gameover-screen').classList.add('hidden');
     gameOver = false;
     audioSynth.start();
+
+    const tutorialDone = localStorage.getItem('hype_dodger_tutorial_done') === 'true';
+    if (!tutorialDone) {
+        inTutorial = true;
+        tutorialStep = 0;
+        tutorialCooldown = 0;
+        tutorialSpawned = false;
+        const banner = document.getElementById('tutorial-banner');
+        if (banner) banner.classList.remove('hidden');
+    } else {
+        inTutorial = false;
+        const banner = document.getElementById('tutorial-banner');
+        if (banner) banner.classList.add('hidden');
+    }
+
     initGame();
 }
 
@@ -212,6 +283,22 @@ function initGame() {
         roll: 0,
         targetRoll: 0
     };
+    
+    // Reset key input states
+    keyLeft = false;
+    keyRight = false;
+    isSteeringLeft = false;
+    isSteeringRight = false;
+    
+    // Reset shields
+    shieldHp = 2;
+    updateShieldUI();
+    
+    // Reset tutorial state guards
+    tutorialSpawned = false;
+    if (inTutorial) {
+        updateTutorialBanner();
+    }
     
     // Clear obstacles
     obstacles.forEach(obs => { scene.remove(obs.mesh); scene.remove(obs.shadowMesh); if (obs.dangerLight) scene.remove(obs.dangerLight); });
@@ -247,8 +334,10 @@ function initGame() {
     nodeHudMode = 'HIDDEN';
     if (nodeFlashTimeout) { clearTimeout(nodeFlashTimeout); nodeFlashTimeout = null; }
     const nodePanel = document.getElementById('node-panel');
-    nodePanel.classList.remove('hidden');
-    nodePanel.classList.remove('hud-visible');
+    if (nodePanel) {
+        nodePanel.classList.remove('hidden');
+        nodePanel.classList.remove('hud-visible');
+    }
     drawNodePips();
 
     
@@ -260,13 +349,88 @@ function initGame() {
     shipGroup.position.set(0, 0.25, -5);
     shipGroup.scale.set(1, 1, 1);
     
-    isSteeringLeft = false;
-    isSteeringRight = false;
+    const shieldMesh = shipGroup.getObjectByName("shieldMesh");
+    if (shieldMesh) {
+        shieldMesh.material.opacity = 0.0;
+        shieldMesh.material.color.setHex(0x00ffcc);
+    }
     
     updateScoreUI();
     updateComboUI();
     
     showFloatingText("SYSTEM INIT", "cyan-glow");
+}
+
+function triggerShieldHit() {
+    if (shieldHp > 0) {
+        shieldHp--;
+        updateShieldUI();
+    }
+    
+    audioSynth.playBounce();
+    addCameraShake(0.3, 0.45);
+    triggerFlash('#ff0055', 0.35);
+    showFloatingText("SHIELD DAMAGED", "pink-glow");
+    
+    // Recovery bullet-time slowdown (automatically decays back to 1.0)
+    timeScale = 0.15;
+    
+    // Shield visual halo flashes red
+    const shieldMesh = shipGroup.getObjectByName("shieldMesh");
+    if (shieldMesh) {
+        shieldMesh.material.opacity = 0.7;
+        shieldMesh.material.color.setHex(0xff0055);
+    }
+}
+
+function triggerShieldRechargeEffect() {
+    const shieldMesh = shipGroup.getObjectByName("shieldMesh");
+    if (shieldMesh) {
+        shieldMesh.material.opacity = 0.5;
+        shieldMesh.material.color.setHex(0x00ffcc);
+    }
+}
+
+function updateTutorialBanner() {
+    const banner = document.getElementById('tutorial-banner');
+    const textEl = document.getElementById('tutorial-text');
+    if (!banner || !textEl) return;
+    
+    banner.classList.remove('hidden');
+    
+    if (tutorialStep === 0) {
+        textEl.innerHTML = "STEER RIGHT TO DODGE!<br><span style='font-size: 11px; color: #ffcc00;'>Press [D] or ArrowRight</span>";
+    } else if (tutorialStep === 1) {
+        textEl.innerHTML = "DODGE CLOSE FOR A NEAR MISS COMBO!<br><span style='font-size: 11px; color: #ffcc00;'>Steer close to the oncoming obstacle</span>";
+    } else if (tutorialStep === 2) {
+        textEl.innerHTML = "COLLECT CYAN GATES, AVOID RED GATES!<br><span style='font-size: 11px; color: #ffcc00;'>Cyan restores shields + builds combos</span>";
+    } else if (tutorialStep === 3) {
+        textEl.innerHTML = "TRAINING COMPLETED!<br><span style='font-size: 11px; color: #00ffcc;'>GRID LOADED. GET READY FOR THE WAVE...</span>";
+    }
+}
+
+function advanceTutorialStep() {
+    tutorialStep++;
+    tutorialSpawned = false;
+    
+    // Clear all obstacles and gates to keep a clean slate for the next training scenario
+    obstacles.forEach(obs => { scene.remove(obs.mesh); scene.remove(obs.shadowMesh); if (obs.dangerLight) scene.remove(obs.dangerLight); });
+    obstacles = [];
+    gates.forEach(g => { scene.remove(g.mesh); if (g.leftPost) scene.remove(g.leftPost); if (g.rightPost) scene.remove(g.rightPost); });
+    gates = [];
+    
+    updateTutorialBanner();
+    
+    if (tutorialStep === 3) {
+        // Complete tutorial after a dramatic delay
+        setTimeout(() => {
+            localStorage.setItem('hype_dodger_tutorial_done', 'true');
+            inTutorial = false;
+            const banner = document.getElementById('tutorial-banner');
+            if (banner) banner.classList.add('hidden');
+            restartGame();
+        }, 3200);
+    }
 }
 
 function triggerWallBounce(isLeft) {
@@ -315,6 +479,10 @@ function triggerNearMiss(obs) {
     showFloatingText(`NEAR MISS +${bonus}`, "yellow-glow");
     updateScoreUI();
     updateComboUI();
+
+    if (inTutorial && tutorialStep === 1) {
+        advanceTutorialStep();
+    }
     
     // Spawn radial gold sparks
     spawnNearMissSparks(shipGroup.position.x, shipGroup.position.y, shipGroup.position.z);
@@ -689,6 +857,15 @@ function applyGateEffect(op) {
         showFloatingText(`+${op.val}`, "cyan-glow");
         audioSynth.playDodge();
         triggerFlash(CONFIG.COLORS.GATE_POSITIVE_BG, 0.12);
+        
+        if (shieldHp < 2) {
+            shieldHp++;
+            updateShieldUI();
+            triggerShieldRechargeEffect();
+        }
+        if (inTutorial && tutorialStep === 2) {
+            advanceTutorialStep();
+        }
     } else if (op.type === 'mult') {
         score *= op.val;
         comboCount += 2; // Extra reward combo bump
@@ -697,6 +874,15 @@ function applyGateEffect(op) {
         showFloatingText(`x${op.val}`, "yellow-glow");
         audioSynth.playDodge();
         triggerFlash(CONFIG.COLORS.GATE_POSITIVE_BG, 0.22);
+        
+        if (shieldHp < 2) {
+            shieldHp++;
+            updateShieldUI();
+            triggerShieldRechargeEffect();
+        }
+        if (inTutorial && tutorialStep === 2) {
+            advanceTutorialStep();
+        }
     } else if (op.type === 'sub') {
         score = Math.max(0, score - op.val);
         comboCount = 0; // Break combo chain
@@ -721,6 +907,12 @@ function applyGateEffect(op) {
         audioSynth.playDodge();
         triggerFlash(CONFIG.COLORS.GATE_POSITIVE_BG, 0.15);
         statsNodesHit++;
+        
+        if (shieldHp < 2) {
+            shieldHp++;
+            updateShieldUI();
+            triggerShieldRechargeEffect();
+        }
 
         // FLASH → PERSISTENT: first correct hit unlocks the persistent pip ring
         if (nodeHudMode !== 'PERSISTENT') {
@@ -937,10 +1129,10 @@ function gameLoop(currentTime) {
         }
         
         // 2. Player horizontal drift physics
-        if (isSteeringLeft) {
+        if (isSteeringLeft || keyLeft) {
             player.vx -= CONFIG.PLAYER.ACCEL;
             player.targetRoll = 0.45; // target left visual wing tilt roll angle in radians
-        } else if (isSteeringRight) {
+        } else if (isSteeringRight || keyRight) {
             player.vx += CONFIG.PLAYER.ACCEL;
             player.targetRoll = -0.45; // target right visual wing tilt roll angle in radians
         } else {
@@ -971,25 +1163,70 @@ function gameLoop(currentTime) {
         shipGroup.rotation.z = player.roll;
         shipGroup.rotation.y = player.vx * CONFIG.PLAYER.YAW_TILT; // yaw tilt
         
-        // Continuous speed increase with acceleration and clamping
-        gameSpeed = Math.min(gameSpeed + CONFIG.SPEED.ACCEL * timeScale * userSpeedMultiplier, CONFIG.SPEED.MAX * userSpeedMultiplier);
-        
-        // Scale velocity based on the current stage speed scale configuration (boosted in Fever mode)
-        const feverSpeedMultiplier = feverActive ? 1.5 : 1.0;
-        const activeSpeed = gameSpeed * CONFIG.STAGES[currentStageIndex].speedScale * feverSpeedMultiplier;
+        let activeSpeed;
+        if (inTutorial) {
+            // Lock game speed slow for tutorial onboarding
+            gameSpeed = 0.25;
+            activeSpeed = 0.25;
+            
+            // Handle step-by-step tutorial spawning logic
+            if (tutorialCooldown > 0) {
+                tutorialCooldown -= dt * timeScale;
+            } else if (!tutorialSpawned) {
+                if (tutorialStep === 0) {
+                    // Step 0: steer right to dodge obstacle on left
+                    spawnObstacle(-2.2, CONFIG.OBSTACLES.SPAWN_Z);
+                    tutorialSpawned = true;
+                } else if (tutorialStep === 1) {
+                    // Step 1: steer close to dodge obstacle on right (near-miss training)
+                    spawnObstacle(2.2, CONFIG.OBSTACLES.SPAWN_Z);
+                    tutorialSpawned = true;
+                } else if (tutorialStep === 2) {
+                    // Step 2: collect cyan positive gate on left
+                    const leftOp = { type: 'add', val: 50, label: '+50' };
+                    const rightOp = { type: 'sub', val: 50, label: '-50' };
+                    const leftGate = createGateMesh(-CONFIG.GATES.LANE_X, leftOp);
+                    const rightGate = createGateMesh(CONFIG.GATES.LANE_X, rightOp);
+                    
+                    scene.add(leftGate.mesh);
+                    scene.add(leftGate.leftPost);
+                    scene.add(leftGate.rightPost);
+                    scene.add(rightGate.mesh);
+                    scene.add(rightGate.leftPost);
+                    scene.add(rightGate.rightPost);
+                    
+                    const pairId = nextPairId++;
+                    leftGate.pairId = pairId;
+                    rightGate.pairId = pairId;
+                    
+                    gates.push(leftGate);
+                    gates.push(rightGate);
+                    tutorialSpawned = true;
+                }
+            }
+        } else {
+            // Continuous speed increase with acceleration and clamping
+            gameSpeed = Math.min(gameSpeed + CONFIG.SPEED.ACCEL * timeScale * userSpeedMultiplier, CONFIG.SPEED.MAX * userSpeedMultiplier);
+            
+            // Scale velocity based on the current stage speed scale configuration (boosted in Fever mode)
+            const feverSpeedMultiplier = feverActive ? 1.5 : 1.0;
+            activeSpeed = gameSpeed * CONFIG.STAGES[currentStageIndex].speedScale * feverSpeedMultiplier;
+        }
         
         // 3. Grid texture animation
         gridTexture.offset.y -= activeSpeed * CONFIG.ENGINE.SCROLL_ACTIVE * timeScale;
         
-        // 4. Obstacle spawning (faster as gameSpeed increases)
-        let spawnThreshold = Math.max(CONFIG.ENGINE.SPAWN_LIMIT_MIN, Math.floor(CONFIG.ENGINE.SPAWN_LIMIT_MAX - gameSpeed * CONFIG.ENGINE.SPAWN_SPEED_SCALE));
-        if (frameCount % spawnThreshold === 0) {
-            spawnObstacle();
-        }
-        
-        // Spawn math gates at separate intervals
-        if (frameCount % CONFIG.GATES.SPAWN_INTERVAL === 0) {
-            spawnGatePair();
+        // 4. Obstacle Spawning (bypassed in Tutorial Mode)
+        if (!inTutorial) {
+            let spawnThreshold = Math.max(CONFIG.ENGINE.SPAWN_LIMIT_MIN, Math.floor(CONFIG.ENGINE.SPAWN_LIMIT_MAX - gameSpeed * CONFIG.ENGINE.SPAWN_SPEED_SCALE));
+            if (frameCount % spawnThreshold === 0) {
+                spawnObstacle();
+            }
+            
+            // Spawn math gates at separate intervals
+            if (frameCount % CONFIG.GATES.SPAWN_INTERVAL === 0) {
+                spawnGatePair();
+            }
         }
         
         // 5. Update Combo timer decay
@@ -1038,6 +1275,7 @@ function gameLoop(currentTime) {
     }
     
     // 7. Update Obstacles
+    let nearMissActive = false;
     for (let i = 0; i < obstacles.length; i++) {
         let obs = obstacles[i];
         
@@ -1075,8 +1313,24 @@ function gameLoop(currentTime) {
             let dx = Math.abs(shipGroup.position.x - obs.mesh.position.x);
             let dz = Math.abs(shipGroup.position.z - obs.mesh.position.z);
             
+            // Visual target range check: if obstacle is close laterally and approaching
+            if (!obs.passed && obs.mesh.position.z < shipGroup.position.z && obs.mesh.position.z > shipGroup.position.z - 15) {
+                if (dx < CONFIG.COLLISION.NEAR_MISS_DIST) {
+                    nearMissActive = true;
+                }
+            }
+            
             if (!feverActive && dx < CONFIG.COLLISION.BOX_X && dz < CONFIG.COLLISION.BOX_Z) {
-                triggerGameOver();
+                if (inTutorial) {
+                    // Tutorial buffer: shield absorbing hit or simple warning bounce
+                    triggerShieldHit();
+                    obs.passed = true;
+                } else if (shieldHp > 0) {
+                    triggerShieldHit();
+                    obs.passed = true;
+                } else {
+                    triggerGameOver();
+                }
             }
             // Near Miss Mechanic
             else if (!obs.passed && obs.mesh.position.z > shipGroup.position.z) {
@@ -1087,6 +1341,11 @@ function gameLoop(currentTime) {
                      // Safe evade
                      score += CONFIG.COLLISION.EVADE_SCORE;
                      updateScoreUI();
+                     
+                     // Tutorial step 0 dodge completion check
+                     if (inTutorial && tutorialStep === 0) {
+                         advanceTutorialStep();
+                     }
                 }
             }
         }
@@ -1098,6 +1357,29 @@ function gameLoop(currentTime) {
             scene.remove(obs.dangerLight);
             obstacles.splice(i, 1);
             i--;
+            
+            // Tutorial step 1 retry: if they dodge it but fail to near-miss, let them retry
+            if (inTutorial && tutorialStep === 1) {
+                tutorialSpawned = false;
+            }
+        }
+    }
+    
+    // 7a. Update Shield Aura Mesh visual based on current shield HP and proximity
+    const shieldMesh = shipGroup.getObjectByName("shieldMesh");
+    if (shieldMesh) {
+        let targetOpacity = 0.0;
+        if (shieldHp === 2) targetOpacity = 0.10;
+        else if (shieldHp === 1) targetOpacity = 0.05;
+        
+        if (nearMissActive) {
+            // Pulse bright yellow/gold warning aura when close to obstacle
+            shieldMesh.material.color.setHex(0xffcc00);
+            shieldMesh.material.opacity = 0.28 + 0.12 * Math.sin(frameCount * 0.22);
+        } else {
+            // Restore normal cyan color and fade back to base shield health opacity
+            shieldMesh.material.color.setHex(0x00ffcc);
+            shieldMesh.material.opacity += (targetOpacity - shieldMesh.material.opacity) * 0.08;
         }
     }
     
@@ -1167,6 +1449,11 @@ function gameLoop(currentTime) {
             scene.remove(gate.rightPost);
             gates.splice(i, 1);
             i--;
+            
+            // Tutorial step 2 retry: if they miss the gates, reset spawn guard to spawn another pair
+            if (inTutorial && tutorialStep === 2) {
+                tutorialSpawned = false;
+            }
         }
     }
     

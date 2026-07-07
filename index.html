@@ -32,22 +32,32 @@
 
         <!-- HUD Overlay -->
         <div id="hud">
-            <div id="score-panel" class="hud-panel">
-                <span class="score-label">Score</span>
-                <span id="score-text" class="score-val">00000</span>
-            </div>
+            <div class="hud-column left">
+                <div id="score-panel" class="hud-panel">
+                    <span class="score-label">Score</span>
+                    <span id="score-text" class="score-val">00000</span>
+                </div>
 
-            <button id="mute-btn">SOUND: ON</button>
-            <button id="speed-btn" aria-pressed="false">SPEED: NORMAL</button>
+                <div id="shield-panel" class="hud-panel">
+                    <span class="score-label">Shield</span>
+                    <span id="shield-text" class="score-val">⚡⚡</span>
+                </div>
+            </div>
 
             <div id="node-panel" class="hud-panel hidden">
                 <span class="score-label" id="node-flash-label">NODE TARGET</span>
                 <canvas id="node-pip-canvas" width="120" height="20"></canvas>
             </div>
 
-            <div id="best-panel" class="hud-panel">
-                <span class="score-label">Record</span>
-                <span id="best-text" class="score-val">00000</span>
+            <div class="hud-column right">
+                <div id="best-panel" class="hud-panel">
+                    <span class="score-label">Record</span>
+                    <span id="best-text" class="score-val">00000</span>
+                </div>
+                <div class="hud-buttons">
+                    <button id="speed-btn" aria-pressed="false">SPEED: NORMAL</button>
+                    <button id="mute-btn">SOUND: ON</button>
+                </div>
             </div>
         </div>
 
@@ -57,6 +67,11 @@
             <div id="combo-progress-bar">
                 <div id="combo-progress-fill"></div>
             </div>
+        </div>
+
+        <!-- Tutorial instructions banner overlay -->
+        <div id="tutorial-banner" class="hidden">
+            <span id="tutorial-text">INITIALIZING SYSTEM...</span>
         </div>
 
         <!-- Start/Menu Screen -->

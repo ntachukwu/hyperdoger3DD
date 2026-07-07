@@ -142,9 +142,42 @@ function createGameAssets(scene) {
     const engineLight = new THREE.PointLight(0x00ffcc, 1.5, 6);
     engineLight.position.set(0, 0, 1.0);
     shipGroup.add(engineLight);
+
+    // Visual shield mesh around shipGroup (radius matching near miss zone, 1.25)
+    const shieldGeo = new THREE.SphereGeometry(1.25, 16, 16);
+    const shieldMat = new THREE.MeshBasicMaterial({
+        color: 0x00ffcc,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.0, // Initial state, will be updated by gameplay script
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+    });
+    const shieldMesh = new THREE.Mesh(shieldGeo, shieldMat);
+    shieldMesh.name = "shieldMesh";
+    shipGroup.add(shieldMesh);
     
     shipGroup.position.set(0, 0.25, -5);
     scene.add(shipGroup);
+
+    // Faint parallel lane guide lasers on the grid floor dividing Left, Center, Right lanes
+    const laneGeo1 = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(-1.1, 0.015, 10),
+        new THREE.Vector3(-1.1, 0.015, -100)
+    ]);
+    const laneGeo2 = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(1.1, 0.015, 10),
+        new THREE.Vector3(1.1, 0.015, -100)
+    ]);
+    const laneMat = new THREE.LineBasicMaterial({
+        color: 0x9d00ff,
+        transparent: true,
+        opacity: 0.12
+    });
+    const laneLine1 = new THREE.Line(laneGeo1, laneMat);
+    const laneLine2 = new THREE.Line(laneGeo2, laneMat);
+    scene.add(laneLine1);
+    scene.add(laneLine2);
     
     return { 
         gridTexture, 

@@ -78,3 +78,28 @@ function triggerFlash(color, opacity = 0.25) {
         }
     }, 20);
 }
+
+function updateShieldUI() {
+    const shieldEl = document.getElementById('shield-text');
+    if (!shieldEl) return;
+    const currentShield = typeof shieldHp !== 'undefined' ? shieldHp : 0;
+    
+    let shieldStr = "";
+    for (let i = 0; i < currentShield; i++) {
+        shieldStr += "⚡";
+    }
+    if (shieldStr === "") shieldStr = "NONE";
+    
+    shieldEl.innerText = shieldStr;
+    
+    if (currentShield === 2) {
+        shieldEl.style.color = "#00ffcc";
+        shieldEl.style.textShadow = "0 0 10px rgba(0, 255, 204, 0.6)";
+    } else if (currentShield === 1) {
+        shieldEl.style.color = "#ffcc00";
+        shieldEl.style.textShadow = "0 0 10px rgba(255, 204, 0, 0.6)";
+    } else {
+        shieldEl.style.color = "#ff0055";
+        shieldEl.style.textShadow = "0 0 10px rgba(255, 0, 85, 0.6)";
+    }
+}

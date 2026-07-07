@@ -62,6 +62,58 @@ canvas {
     align-items: flex-start;
 }
 
+.hud-column {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: auto; /* Allow buttons to be clicked */
+}
+
+.hud-column.right {
+    align-items: flex-end;
+}
+
+.hud-buttons {
+    display: flex;
+    gap: 6px;
+}
+
+/* Tutorial banner overlay */
+#tutorial-banner {
+    position: absolute;
+    top: 28%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(10, 10, 20, 0.85);
+    border: 2px solid #ffcc00;
+    box-shadow: 0 0 25px rgba(255, 204, 0, 0.45);
+    padding: 16px 28px;
+    border-radius: 12px;
+    z-index: 10;
+    pointer-events: none;
+    text-align: center;
+    max-width: 80%;
+    width: max-content;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+#tutorial-banner.hidden {
+    opacity: 0;
+    transform: translate(-50%, -60%);
+    pointer-events: none;
+}
+
+#tutorial-text {
+    font-size: 15px;
+    font-weight: 900;
+    color: #ffffff;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+}
+
 .hud-panel {
     background: rgba(10, 10, 18, 0.55);
     backdrop-filter: blur(10px);
