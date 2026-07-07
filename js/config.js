@@ -53,12 +53,12 @@ const CONFIG = {
     },
     CAMERA: {
         DECAY: 0.88,   // Frame decay factor of the camera shake effect
-        X_TRACK: 0.58, // Player follow position scalar on horizontal axis
-        Y_BASE: 2.4,   // Baseline camera height from ground level
-        Z_BASE: 5.0,   // Camera follow distance behind player
-        X_LOOK: 0.28,  // Focal focus point tracking scalar relative to player X
-        Y_LOOK: 0.4,   // Camera focus point target height Y
-        Z_LOOK: -10.0  // Camera focus point target depth Z
+        X_TRACK: 0.65, // Lateral tracking dampener
+        Y_BASE: 3.2,   // Baseline camera height from ground level (elevated from 2.4)
+        Z_BASE: 4.6,   // Camera follow distance behind player (pulled closer from 5.0)
+        X_LOOK: 0.45,  // Camera look target lateral dampener
+        Y_LOOK: 0.1,   // Camera focus point target height Y (pitched lower from 0.4)
+        Z_LOOK: -14.0  // Camera focus point target depth Z (extended from -10.0)
     },
     SPEED_LINES: {
         COUNT: 15,    // Count of instantiated lines for the warp effect
