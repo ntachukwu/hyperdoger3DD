@@ -423,6 +423,25 @@ function triggerShieldRechargeEffect() {
     }
 }
 
+function triggerConeBounce() {
+    comboCount = 0;
+    audioSynth.setComboCount(comboCount);
+    updateComboUI();
+    
+    // Score penalty trade-off
+    const penalty = 50;
+    score = Math.max(0, score - penalty);
+    updateScoreUI();
+    
+    audioSynth.playBounce();
+    addCameraShake(0.2, 0.35);
+    triggerFlash('#ff5e00', 0.22);
+    showFloatingText(`-${penalty} GLIDE STRUCK`, "pink-glow");
+    
+    // Recovery slow-motion (automatically decays back to 1.0)
+    timeScale = 0.15;
+}
+
 function updateTutorialBanner() {
     const banner = document.getElementById('tutorial-banner');
     const textEl = document.getElementById('tutorial-text');
@@ -708,6 +727,7 @@ function spawnObstacle(customX = null, customZ = null) {
         shadowMesh: shadowMesh,
         dangerLight: dangerLight,
         color: randColor,
+        type: type, // Store shape type (0: octahedron, 1: cone, 2: box)
         passed: false,
         rx: (Math.random() - 0.5) * CONFIG.OBSTACLES.ROT_MAX,
         ry: (Math.random() - 0.5) * CONFIG.OBSTACLES.ROT_MAX,
@@ -1381,11 +1401,26 @@ function gameLoop(currentTime) {
                     // Tutorial buffer: shield absorbing hit or simple warning bounce
                     triggerShieldHit();
                     obs.passed = true;
-                } else if (shieldHp > 0) {
-                    triggerShieldHit();
-                    obs.passed = true;
-                } else {
+                } else if (obs.type === 2) {
+                    // Box: Bypasses shields, catastrophic crash
                     triggerGameOver();
+                } else if (obs.type === 0) {
+                    // Octahedron: Standard shard. Absorbed by shields; triggers crash if shields empty
+                    if (shieldHp > 0) {
+                        triggerShieldHit();
+                        obs.passed = true;
+                    } else {
+                        triggerGameOver();
+                    }
+                } else if (obs.type === 1) {
+                    // Cone: Light fragment. Absorbed by shields; triggers non-fatal bounce if shields empty
+                    if (shieldHp > 0) {
+                        triggerShieldHit();
+                        obs.passed = true;
+                    } else {
+                        triggerConeBounce();
+                        obs.passed = true;
+                    }
                 }
             }
             // Near Miss Mechanic
