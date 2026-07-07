@@ -1096,17 +1096,28 @@ function updateStageVisuals(stage) {
 function resize() {
     let width = window.innerWidth;
     let height = window.innerHeight;
-    const aspect = 9 / 16; // Standard mobile/arcade portrait target aspect ratio
+    const targetAspect = 9 / 16;
+    const screenAspect = width / height;
     
-    if (width / height > aspect) {
-        width = height * aspect;
+    let renderW, renderH;
+    
+    if (screenAspect > targetAspect) {
+        // Desktop/Tablet: Lock to centered 9:16 arcade ratio columns
+        renderH = height;
+        renderW = height * targetAspect;
     } else {
-        height = width / aspect;
+        // Tall smartphones (e.g. Pixel 7a): Full bleed heights (no black bars!)
+        renderW = width;
+        renderH = height;
     }
     
-    renderer.setSize(width, height);
-    renderer.domElement.style.width = width + 'px';
-    renderer.domElement.style.height = height + 'px';
+    renderer.setSize(renderW, renderH);
+    renderer.domElement.style.width = renderW + 'px';
+    renderer.domElement.style.height = renderH + 'px';
+    
+    // Dynamically adjust camera aspect to prevent stretching
+    camera.aspect = renderW / renderH;
+    camera.updateProjectionMatrix();
 }
 window.addEventListener('resize', resize);
 resize();
