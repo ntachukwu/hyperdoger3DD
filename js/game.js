@@ -195,6 +195,38 @@ function handleKeyUp(e) {
 // Button actions
 document.getElementById('start-btn').addEventListener('click', startGame);
 document.getElementById('restart-btn').addEventListener('click', restartGame);
+document.getElementById('reset-btn-start').addEventListener('click', resetAllData);
+document.getElementById('reset-btn-gameover').addEventListener('click', resetAllData);
+
+function resetAllData(e) {
+    try {
+        localStorage.removeItem('hype_dodger_tutorial_done');
+        localStorage.removeItem('hype_dodger_high');
+    } catch (err) {}
+    
+    highScore = 0;
+    
+    inTutorial = true;
+    tutorialStep = 0;
+    tutorialCooldown = 0;
+    tutorialSpawned = false;
+    
+    const startScreen = document.getElementById('start-screen');
+    if (startScreen) startScreen.classList.add('hidden');
+    
+    const gameoverScreen = document.getElementById('gameover-screen');
+    if (gameoverScreen) gameoverScreen.classList.add('hidden');
+    
+    const banner = document.getElementById('tutorial-banner');
+    if (banner) banner.classList.remove('hidden');
+    
+    gameOver = false;
+    gameStarted = true;
+    audioSynth.start();
+    initGame();
+    
+    if (e) e.stopPropagation();
+}
 
 document.getElementById('speed-btn').addEventListener('click', (e) => {
     const oldMultiplier = userSpeedMultiplier;

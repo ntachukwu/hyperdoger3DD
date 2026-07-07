@@ -307,6 +307,22 @@ canvas {
     text-shadow: 0 0 8px #fff;
 }
 
+.btn-action.btn-danger {
+    border-color: var(--neon-pink);
+    box-shadow: 0 0 10px rgba(255, 0, 85, 0.15), inset 0 0 10px rgba(255, 0, 85, 0.05);
+    font-size: 13px;
+    padding: 10px 24px;
+    margin-top: 14px;
+    border-radius: 20px;
+}
+
+.btn-action.btn-danger:hover,
+.btn-action.btn-danger:active {
+    border-color: #ff3366;
+    box-shadow: 0 0 20px rgba(255, 51, 102, 0.5), inset 0 0 10px rgba(255, 51, 102, 0.2);
+    text-shadow: 0 0 8px #fff;
+}
+
 .controls-tip {
     margin-top: 40px;
     font-size: 12px;
